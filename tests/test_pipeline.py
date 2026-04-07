@@ -44,10 +44,11 @@ def test_pipeline_morning_run_buy(
 
     
     mock_ta = MagicMock()
-    mock_ta.analyze.return_value = TechAnalysisResult(
+    spy_analysis = TechAnalysisResult(
         symbol="SPY", rating="buy", entry_price=507.0,
         exit_price=530.0, stop_loss=490.0, reasoning="Bullish",
     )
+    mock_ta.analyze_batch.return_value = {"SPY": spy_analysis}
     mock_ta_cls.return_value = mock_ta
 
     
@@ -115,10 +116,11 @@ def test_pipeline_risk_rejected(
     mock_config.storage.db_path = str(tmp_path / "test.db")
 
     mock_ta = MagicMock()
-    mock_ta.analyze.return_value = TechAnalysisResult(
+    spy_analysis = TechAnalysisResult(
         symbol="SPY", rating="buy", entry_price=507.0,
         exit_price=530.0, stop_loss=490.0, reasoning="Bullish",
     )
+    mock_ta.analyze_batch.return_value = {"SPY": spy_analysis}
     mock_ta_cls.return_value = mock_ta
 
     mock_pm = MagicMock()
