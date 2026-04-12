@@ -65,6 +65,36 @@ class RiskVerdict(BaseModel):
     reasoning: str
 
 
+class NewsEvent(BaseModel):
+    headline: str
+    impact: str  
+    affected_sectors: list[str] = []
+    affected_symbols: list[str] = []
+    sentiment: str  
+    explanation: str
+
+
+class SectorImpact(BaseModel):
+    sector: str
+    sentiment: str  
+    reason: str
+
+
+class SymbolAlert(BaseModel):
+    symbol: str
+    sentiment: str  
+    reason: str
+
+
+class NewsAnalysisResult(BaseModel):
+    market_sentiment: str  
+    confidence: str  
+    key_events: list[NewsEvent] = []
+    sector_impacts: list[SectorImpact] = []
+    symbol_alerts: list[SymbolAlert] = []
+    summary: str
+
+
 class Position(BaseModel):
     symbol: str
     qty: float
