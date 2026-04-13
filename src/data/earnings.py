@@ -214,7 +214,10 @@ class EarningsDataProvider:
 
         if last_known == latest.filing_date:
             
-            return self._get_existing_analysis(symbol)
+            existing = self._get_existing_analysis(symbol)
+            if existing:
+                return existing
+            
 
         
         local_path = self._download_filing(cik, latest)

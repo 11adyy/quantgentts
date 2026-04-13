@@ -22,16 +22,28 @@ class AgentResult:
 
     def parse_json(self) -> dict | None:
         try:
-            
             text = self.raw_text.strip()
-            if text.startswith("```"):
-                lines = text.split("\n")
-                
-                text = "\n".join(lines[1:-1])
+            
             return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        try:
+            
+            import re
+            match = re.search(r"```(?:json)?\s*\n(.*?)\n```", self.raw_text, re.DOTALL)
+            if match:
+                return json.loads(match.group(1))
+            
+            for i, ch in enumerate(self.raw_text):
+                if ch in "{[":
+                    try:
+                        return json.loads(self.raw_text[i:])
+                    except json.JSONDecodeError:
+                        continue
         except (json.JSONDecodeError, IndexError):
-            logger.warning("Failed to parse agent response as JSON: %s", self.raw_text[:200])
-            return None
+            pass
+        logger.warning("Failed to parse agent response as JSON: %s", self.raw_text[:200])
+        return None
 
 
 class BaseAgent(ABC):
