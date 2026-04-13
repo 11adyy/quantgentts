@@ -114,7 +114,8 @@ storage:
     config_file = tmp_path / "settings.yaml"
     config_file.write_text(yaml_content)
 
+    import pytest
     from src.config import load_config
-    cfg = load_config(config_file)
     
-    assert cfg.api_keys.anthropic == ""
+    with pytest.raises(Exception, match="API key"):
+        load_config(config_file)

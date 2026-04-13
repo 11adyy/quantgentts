@@ -16,7 +16,8 @@ class RiskRuleEngine:
         self.config = config
 
     def check(self, decision: TradeDecision, positions: list[Position],
-              total_value: float, daily_pnl: float) -> list[RiskViolation]:
+              total_value: float, daily_pnl: float,
+              pending_investment: float = 0.0) -> list[RiskViolation]:
         if decision.action == "SELL":
             return []
         if total_value <= 0:
@@ -36,7 +37,7 @@ class RiskRuleEngine:
         
         current_invested = sum(p.market_value for p in positions)
         new_investment = total_value * (decision.allocation_pct / 100)
-        total_pct = (current_invested + new_investment) / total_value * 100
+        total_pct = (current_invested + pending_investment + new_investment) / total_value * 100
         if total_pct > self.config.max_total_position_pct:
             violations.append(RiskViolation(
                 rule="max_total_position_pct",
