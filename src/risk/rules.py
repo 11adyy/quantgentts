@@ -3,6 +3,21 @@ from src.config import RiskConfig
 from src.models import TradeDecision, Position
 
 
+_ETF_LEVERAGE = {
+    "SH": -1.0,    
+    "SDS": -2.0,   
+    "PSQ": -1.0,   
+    "SQQQ": -3.0,  
+    "DRAM": 1.0,   
+    "SMH": 1.0,
+}
+
+
+def _effective_multiplier(symbol: str) -> float:
+    """Return the effective exposure multiplier for a symbol."""
+    return abs(_ETF_LEVERAGE.get(symbol, 1.0))
+
+
 @dataclass
 class RiskViolation:
     rule: str
@@ -26,12 +41,14 @@ class RiskRuleEngine:
             return []
 
         violations = []
+        multiplier = _effective_multiplier(decision.symbol)
         new_investment = total_value * (decision.allocation_pct / 100)
+        effective_new_investment = new_investment * multiplier
 
         
         current_symbol_value = sum(p.market_value for p in positions if p.symbol == decision.symbol)
         current_symbol_value += (pending_symbol_investment or {}).get(decision.symbol, 0.0)
-        position_pct = (current_symbol_value + new_investment) / total_value * 100
+        position_pct = (current_symbol_value * multiplier + effective_new_investment) / total_value * 100
         if position_pct > self.config.max_position_pct:
             violations.append(RiskViolation(
                 rule="max_position_pct",
@@ -41,8 +58,8 @@ class RiskRuleEngine:
             ))
 
         
-        current_invested = sum(p.market_value for p in positions)
-        total_pct = (current_invested + pending_investment + new_investment) / total_value * 100
+        current_invested = sum(p.market_value * _effective_multiplier(p.symbol) for p in positions)
+        total_pct = (current_invested + pending_investment + effective_new_investment) / total_value * 100
         if total_pct > self.config.max_total_position_pct:
             violations.append(RiskViolation(
                 rule="max_total_position_pct",
@@ -76,7 +93,7 @@ class RiskRuleEngine:
         if new_sector and new_sector != "Unknown":
             sector_value = sum(p.market_value for p in positions if p.sector == new_sector)
             sector_value += (pending_sector_investment or {}).get(new_sector, 0.0)
-            sector_value += new_investment
+            sector_value += effective_new_investment
             sector_pct = sector_value / total_value * 100
             if sector_pct > self.config.max_sector_pct:
                 violations.append(RiskViolation(
