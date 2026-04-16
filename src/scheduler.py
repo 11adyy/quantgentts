@@ -12,7 +12,9 @@ class TradingScheduler:
     def __init__(self, config: AppConfig):
         self.config = config
         self.pipeline = TradingPipeline(config)
-        self.scheduler = BlockingScheduler()
+        
+        
+        self.scheduler = BlockingScheduler(timezone="US/Eastern")
 
     def _parse_time(self, time_str: str) -> tuple[int, int]:
         parts = time_str.split(":")
