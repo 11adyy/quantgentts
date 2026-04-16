@@ -110,6 +110,10 @@ class RiskModification(BaseModel):
 class RiskVerdict(BaseModel):
     approved: bool
     modifications: list[RiskModification] = []
+    
+    
+    
+    scale_all_buys: float = Field(default=1.0, ge=0.0, le=1.0)
     reasoning: str
 
 

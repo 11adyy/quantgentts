@@ -136,7 +136,7 @@ Bear triggers (would turn defensive):
             stock_items = []
             for sym, alerts in news_intel.stock_news.items():
                 sorted_alerts = sorted(alerts, key=lambda a: _conv_order.get(a.conviction, 9))
-                for a in sorted_alerts[:2]:
+                for a in sorted_alerts[:3]:
                     stock_items.append(f"- {sym}: [{a.conviction.upper()}] {a.sentiment} — {a.impact_summary}")
             stock_text = "\n".join(stock_items) if stock_items else "No stock-specific news."
 
@@ -164,10 +164,19 @@ Overall sentiment: {news_intel.market_sentiment} (confidence: {news_intel.confid
         if earnings_analyses:
             earnings_items = []
             for ea in earnings_analyses:
+                sym = ea.get("symbol", "?")
+                
+                if ea.get("queued") and not ea.get("analysis"):
+                    earnings_items.append(
+                        f"### {sym} — {ea.get('form_type', '?')} ({ea.get('filing_date', '?')}) "
+                        f"[JUST FILED — analysis in progress, not yet ready for this run]\n"
+                        f"- Discount any prior-quarter cached data for {sym} accordingly. "
+                        f"New filing's numbers and guidance will be available next session."
+                    )
+                    continue
                 analysis = ea.get("analysis")
                 if not analysis:
                     continue
-                sym = ea.get("symbol", "?")
                 impl = analysis.get("investment_implications", {})
                 rev = analysis.get("revenue", {})
                 prof = analysis.get("profitability", {})
@@ -225,7 +234,13 @@ Overall sentiment: {news_intel.market_sentiment} (confidence: {news_intel.confid
                 except (json.JSONDecodeError, TypeError):
                     pass
             actions_text = "\n".join(f"  - {a}" for a in actions) if isinstance(actions, list) else f"  - {actions}"
-            insights_section = f"""## Yesterday's Evening Insights
+            insights_date = yesterday_insights.get("date", "unknown")
+            insights_ts = yesterday_insights.get("timestamp", "")
+            freshness = f" (from {insights_date}"
+            if insights_ts:
+                freshness += f", written {insights_ts}"
+            freshness += ")"
+            insights_section = f"""## Prior Evening Insights{freshness}
 - Outlook: {yesterday_insights.get('tomorrow_outlook', 'N/A')}
 - Lessons: {yesterday_insights.get('lessons', 'N/A')}
 - Risk Rating: {yesterday_insights.get('risk_rating', 'N/A')}
