@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -116,6 +117,9 @@ class TradingPipeline:
         )
         self.db = Database(config.storage.db_path)
         self.db.initialize()
+        
+        
+        self._bg_threads: list[threading.Thread] = []
 
     @staticmethod
     def _format_qty(qty: float) -> str:
@@ -306,6 +310,30 @@ class TradingPipeline:
             logger.warning("Trading-day check failed; assuming market closed: %s", exc)
             return False
 
+    def _wait_bg_threads(self, timeout_s: float = 120.0) -> None:
+        """Wait for queued earnings-analysis threads to finish before the process exits.
+
+        daemon=True means they'd get SIGKILL'd if main() returns first — a half-finished
+        LLM response would never call confirm_filing, leaving the filing marked is_new
+        forever and burning tokens on every re-run.
+        """
+        bg = getattr(self, "_bg_threads", None)
+        if not bg:
+            return
+        deadline = time.monotonic() + timeout_s
+        for t in bg:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            t.join(remaining)
+        alive = [t for t in bg if t.is_alive()]
+        if alive:
+            logger.warning(
+                "_wait_bg_threads: %d/%d background thread(s) still alive after %.0fs — will be killed on process exit",
+                len(alive), len(bg), timeout_s,
+            )
+        self._bg_threads = alive
+
     def _refresh_account_state(self):
         account = self.broker.get_account()
         positions = self.broker.get_positions()
@@ -398,6 +426,7 @@ class TradingPipeline:
                     daemon=True,
                 )
                 bg.start()
+                self._bg_threads.append(bg)
 
             logger.info("[%s] Earnings: %d cached analyses, %d new filings queued",
                         session, len(cached_results), len(new_reports))
@@ -524,6 +553,10 @@ class TradingPipeline:
             earnings_future = executor.submit(_run_earnings)
 
         
+        
+        
+        data_status: dict[str, str] = {}
+
         macro_analysis = None
         macro_summary = {}
         try:
@@ -541,21 +574,30 @@ class TradingPipeline:
                 logger.info("Macro analysis: regime=%s, outlook=%s, exposure=%s",
                              macro_analysis.get("regime"), macro_analysis.get("equity_outlook"),
                              macro_analysis.get("position_guidance", {}).get("overall_exposure"))
+                data_status["macro"] = "ok"
+            else:
+                data_status["macro"] = "parse_error"
         except Exception as e:
             logger.error("Macro analyst failed: %s. Continuing without macro.", e)
+            data_status["macro"] = "failed"
 
         news_intel: NewsIntelligenceReport | None = None
         try:
             news_intel = news_future.result()
             if news_intel:
                 logger.info("News briefing: %s", news_intel.pm_briefing[:200])
+                data_status["news"] = "ok"
+            else:
+                data_status["news"] = "parse_error"
         except Exception as e:
             logger.error("News analyst failed: %s. Continuing without news.", e)
+            data_status["news"] = "failed"
 
         analyses: list[TechAnalysisResult] = []
         try:
             analyses_map, ta_result = tech_future.result()
             analyses = list(analyses_map.values())
+            data_status["tech"] = "ok" if analyses else "empty"
             if ta_result:
                 self.db.insert_agent_log(
                     agent_name="tech_analyst", run_id=run_id,
@@ -569,12 +611,15 @@ class TradingPipeline:
             logger.info("Technical analysis complete: %d symbols in 1 LLM call", len(analyses))
         except Exception as e:
             logger.error("Tech analyst failed: %s. Continuing without technical data.", e)
+            data_status["tech"] = "failed"
 
         earnings_results = []
         try:
             _, earnings_results = earnings_future.result()
+            data_status["earnings"] = "ok"
         except Exception as e:
             logger.error("Earnings check failed: %s. Continuing without earnings.", e)
+            data_status["earnings"] = "failed"
 
         if not analyses:
             logger.warning("No analyses produced, skipping trading")
@@ -659,6 +704,24 @@ class TradingPipeline:
                 "Allowing %d non-blocked orders through after hard risk filter",
                 len(portfolio_decision.decisions),
             )
+
+        
+        
+        
+        degraded = [k for k, v in data_status.items() if v not in ("ok", "empty")]
+        if len(degraded) >= 2:
+            from src.risk.rules import RiskViolation as _RV
+            rule_violations.append(_RV(
+                rule="data_degraded",
+                message=(
+                    f"Upstream data sources degraded: {', '.join(sorted(degraded))} "
+                    f"(status: {data_status}). Decisions may be built on incomplete input — "
+                    f"RM should consider scale_all_buys < 1.0."
+                ),
+                value=float(len(degraded)),
+                limit=1.0,
+            ))
+            logger.warning("Morning data degradation: %s", data_status)
 
         
         
@@ -905,6 +968,7 @@ class TradingPipeline:
                 logger.error("Order failed for %s %s: %s", decision.action, decision.symbol, e)
 
         logger.info("=== Morning run complete: %d orders executed ===", len(orders))
+        self._wait_bg_threads()
         return {"status": "executed", "orders": orders, "run_id": run_id}
 
     def run_midday(self) -> dict:
@@ -990,8 +1054,24 @@ class TradingPipeline:
             else:
                 
                 
-                if review and review.get("actions"):
-                    for action_item in review["actions"]:
+                
+                
+                
+                _priority = {"SELL": 0, "REDUCE": 1, "TRAIL_STOP": 2, "HOLD": 3}
+                best_by_symbol: dict[str, dict] = {}
+                for ai in (review or {}).get("actions") or []:
+                    sym = (ai.get("symbol") or "").strip().upper()
+                    if not sym:
+                        continue
+                    curr = best_by_symbol.get(sym)
+                    if curr is None or _priority.get(ai.get("action"), 99) < _priority.get(curr.get("action"), 99):
+                        best_by_symbol[sym] = ai
+                if len(best_by_symbol) < len((review or {}).get("actions") or []):
+                    dropped = len((review or {}).get("actions") or []) - len(best_by_symbol)
+                    logger.info("Midday: collapsed %d duplicate same-symbol actions (priority SELL>REDUCE>TRAIL_STOP>HOLD)", dropped)
+
+                if best_by_symbol:
+                    for action_item in best_by_symbol.values():
                         act = action_item.get("action")
                         if act not in ("SELL", "REDUCE", "TRAIL_STOP"):
                             continue
@@ -1017,6 +1097,15 @@ class TradingPipeline:
                                 if new_stop >= existing[0].current_price:
                                     logger.warning(
                                         "Midday: TRAIL_STOP %s skipped — new_stop $%.2f >= current $%.2f",
+                                        symbol, new_stop, existing[0].current_price,
+                                    )
+                                    continue
+                                
+                                
+                                
+                                if new_stop < existing[0].current_price * 0.5:
+                                    logger.warning(
+                                        "Midday: TRAIL_STOP %s skipped — new_stop $%.2f is <50%% of current $%.2f (likely LLM error)",
                                         symbol, new_stop, existing[0].current_price,
                                     )
                                     continue
@@ -1064,6 +1153,7 @@ class TradingPipeline:
                      len(positions),
                      review.get("risk_level", "N/A") if review else "no_positions",
                      len(orders))
+        self._wait_bg_threads()
         return {"status": "reviewed", "positions": len(positions),
                 "review": review, "orders": orders, "run_id": run_id}
 
@@ -1138,12 +1228,19 @@ class TradingPipeline:
             )
 
         
+        
         try:
             pruned = self.db.prune_agent_logs(keep_days=30)
             if pruned:
                 logger.info("Pruned %d old agent_log rows", pruned)
         except Exception as e:
             logger.warning("Agent log prune failed: %s", e)
+        try:
+            pruned_t = self.db.prune_trades(keep_days=365 * 5)
+            if pruned_t:
+                logger.info("Pruned %d trades older than 5 years", pruned_t)
+        except Exception as e:
+            logger.warning("Trades prune failed: %s", e)
 
         logger.info("Evening: value=$%.2f, PnL=$%.2f (%.2f%%), risk=%s",
                      total_value, daily_pnl, daily_return_pct,
@@ -1151,6 +1248,7 @@ class TradingPipeline:
         if analysis:
             logger.info("Summary: %s", analysis.get("daily_summary", ""))
             logger.info("Tomorrow: %s", analysis.get("tomorrow_outlook", ""))
+        self._wait_bg_threads()
         return {
             "status": "analyzed",
             "total_value": total_value,
