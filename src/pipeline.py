@@ -1473,6 +1473,21 @@ class TradingPipeline:
                         market_price = live_price
                         price_map[decision.symbol] = live_price
 
+                
+                
+                
+                
+                if not market_price or market_price <= 0:
+                    bars = getattr(self, "_last_symbols_bars", {}).get(decision.symbol) or []
+                    if bars:
+                        last_close = float(bars[-1].close)
+                        if last_close > 0:
+                            logger.info(
+                                "Using last-bar close $%.2f as price reference for %s (broker pricing unavailable)",
+                                last_close, decision.symbol,
+                            )
+                            market_price = last_close
+
                 limit_price = None
                 sizing_price = None
                 if decision.entry_price > 0:
@@ -1495,15 +1510,19 @@ class TradingPipeline:
                             sizing_price = max(market_price, limit_price)
                     else:
                         sizing_price = market_price
-                elif limit_price is not None:
-                    logger.warning(
-                        "No live market price for %s; sizing and submitting as a limit order at $%.2f",
-                        decision.symbol,
-                        limit_price,
-                    )
-                    sizing_price = limit_price
                 else:
-                    logger.warning("Invalid price for %s, skipping", decision.symbol)
+                    
+                    
+                    
+                    
+                    
+                    
+                    logger.error(
+                        "BUY %s skipped: no verifiable price reference (broker + bars both unavailable). "
+                        "LLM proposed entry $%.2f but cannot be validated.",
+                        decision.symbol,
+                        decision.entry_price,
+                    )
                     continue
 
                 qty = int((total_value * decision.allocation_pct / 100) / sizing_price)
