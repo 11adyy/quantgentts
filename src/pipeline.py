@@ -2719,12 +2719,12 @@ class TradingPipeline:
         ctx.last_equity = last_equity
         ctx.daily_pnl = daily_pnl
 
-        self.db.insert_daily_pnl(
-            date=today_str,
-            total_value=total_value,
-            daily_pnl=daily_pnl,
-            daily_return_pct=daily_return_pct,
-        )
+        
+        
+        
+        
+        
+        
 
         
         evening_news = self._run_news_update(run_id, session="evening")
@@ -2770,9 +2770,13 @@ class TradingPipeline:
         )
 
         
+        
+        
         if analysis:
-            self.db.save_insights(
+            self.db.save_evening_snapshot(
                 date=today_str,
+                total_value=total_value, daily_pnl=daily_pnl,
+                daily_return_pct=daily_return_pct,
                 tomorrow_outlook=analysis.tomorrow_outlook,
                 lessons=analysis.lessons,
                 suggested_actions=analysis.suggested_actions,
@@ -2781,6 +2785,14 @@ class TradingPipeline:
                 tomorrow_conviction=analysis.tomorrow_conviction,
                 tomorrow_key_risks=analysis.tomorrow_key_risks,
                 sell_decisions_assessment=analysis.sell_decisions_assessment,
+            )
+        else:
+            
+            self.db.insert_daily_pnl(
+                date=today_str,
+                total_value=total_value,
+                daily_pnl=daily_pnl,
+                daily_return_pct=daily_return_pct,
             )
 
         
