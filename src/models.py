@@ -563,6 +563,11 @@ class EveningReport(BaseModel):
     tomorrow_bias: Literal["bullish", "neutral", "bearish"] = "neutral"
     tomorrow_conviction: Literal["high", "medium", "low"] = "medium"
     tomorrow_key_risks: list[str] = []
+    
+    
+    
+    
+    sell_decisions_assessment: str = ""
 
 
 class AgentLog(BaseModel):
