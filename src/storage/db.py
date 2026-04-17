@@ -140,8 +140,15 @@ class Database:
             conditions.append("date(timestamp) = date('now')")
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._lock:
+            
+            
+            
+            
+            
+            
+            
             rows = self.conn.execute(
-                f"SELECT * FROM trades {where} ORDER BY timestamp DESC LIMIT ?",
+                f"SELECT * FROM trades {where} ORDER BY timestamp DESC, id DESC LIMIT ?",
                 (*params, limit),
             ).fetchall()
         return [dict(row) for row in rows]

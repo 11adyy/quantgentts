@@ -514,6 +514,95 @@ class TradingPipeline:
             lines.append(f"- [{d}] {event} → {syms}")
         return "\n".join(lines)
 
+    def _auto_take_profit(self, positions, run_id: str,
+                          profit_pct_trigger: float = 15.0,
+                          trim_fraction: float = 0.33) -> list[dict]:
+        """Auto-sell `trim_fraction` of any position up ≥ `profit_pct_trigger`%.
+
+        Runs once per holding (detected by looking for a prior TAKE_PROFIT row
+        in trades after the most recent BUY for that symbol). Prevents winners
+        from giving back all their unrealized gains in a pullback: +30% → +10%
+        happens routinely, and 'let winners run' alone leaves the +20% in the
+        middle uncapured. Trimming 1/3 at the trigger locks a partial realized
+        gain while the remaining 2/3 still rides the trailing stop.
+        """
+        orders: list[dict] = []
+        for p in positions:
+            if p.qty <= 0 or p.avg_entry <= 0:
+                continue
+            cost_basis = p.avg_entry * p.qty
+            if cost_basis <= 0:
+                continue
+            pnl_pct = p.unrealized_pnl / cost_basis * 100
+            if pnl_pct < profit_pct_trigger:
+                continue
+            
+            
+            
+            try:
+                sym_trades = self.db.get_trades(symbol=p.symbol, limit=20)
+            except Exception as e:
+                logger.warning("auto_take_profit: trade history lookup failed for %s: %s", p.symbol, e)
+                continue
+            
+            
+            recent_buy_idx = None
+            for i, t in enumerate(sym_trades):
+                if (t.get("action") or "").upper() == "BUY":
+                    recent_buy_idx = i
+                    break
+            if recent_buy_idx is None:
+                
+                
+                continue
+            already_tp = any(
+                (t.get("action") or "").upper() == "TAKE_PROFIT"
+                for t in sym_trades[:recent_buy_idx]
+            )
+            if already_tp:
+                continue
+
+            
+            trim_qty = p.qty * trim_fraction
+            if float(p.qty).is_integer():
+                trim_qty = max(1.0, float(int(trim_qty)))
+            if trim_qty <= 0 or trim_qty >= p.qty:
+                
+                
+                continue
+            sell_limit = round(p.current_price * 0.995, 2)
+            try:
+                order = self.broker.submit_order(
+                    symbol=p.symbol, qty=trim_qty, side="sell",
+                    limit_price=sell_limit,
+                    reference_price=p.current_price,
+                )
+            except Exception as e:
+                logger.error("auto_take_profit: submit failed for %s: %s", p.symbol, e)
+                continue
+            if not self._order_accepted(order, p.symbol, "sell"):
+                continue
+            try:
+                self.db.insert_trade(
+                    symbol=p.symbol, action="TAKE_PROFIT", qty=trim_qty,
+                    price=p.current_price,
+                    reasoning=(
+                        f"Auto take-profit: {pnl_pct:+.1f}% ≥ {profit_pct_trigger}%, "
+                        f"trimming {trim_fraction * 100:.0f}% (remaining {p.qty - trim_qty:.0f} "
+                        f"shares continue riding stop)"
+                    ),
+                    run_id=run_id,
+                )
+            except Exception as e:
+                logger.warning("auto_take_profit: audit log failed for %s: %s", p.symbol, e)
+            orders.append(order)
+            logger.info(
+                "Auto take-profit: %s +%.1f%% → sold %s of %s @ limit $%.2f",
+                p.symbol, pnl_pct, self._format_qty(trim_qty),
+                self._format_qty(p.qty), sell_limit,
+            )
+        return orders
+
     def _build_rm_recent_verdicts(self, limit: int = 5) -> str:
         """How RM has been judging PM's output over the last N sessions.
 
@@ -1694,6 +1783,17 @@ class TradingPipeline:
         self.db.sync_positions(positions)
 
         
+        
+        
+        
+        
+        auto_tp_orders = self._auto_take_profit(positions, run_id)
+        if auto_tp_orders:
+            
+            positions = self.broker.get_positions()
+            self.db.sync_positions(positions)
+
+        
         midday_news = self._run_news_update(run_id, session="midday")
         if midday_news:
             logger.info("Midday news: %s", midday_news.pm_briefing[:200])
@@ -1702,7 +1802,9 @@ class TradingPipeline:
         
         macro_summary = self.macro.get_macro_summary()
         review = None
-        orders = []
+        
+        
+        orders = list(auto_tp_orders)
         if positions:
             morning_trades = self.db.get_trades(limit=50, today_only=True)
             review, md_result = self.midday_reviewer.review(
