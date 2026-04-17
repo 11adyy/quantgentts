@@ -21,21 +21,53 @@ class AgentResult:
     model: str
     user_message: str = ""
 
+    
+    
+    
+    
+    _EXPECTED_AGENT_KEYS = frozenset({
+        "decisions",           
+        "approved",            
+        "actions",             
+        "daily_summary",       
+        "tomorrow_outlook",    
+        "regime",              
+        "reasoning_chain",     
+        "investment_implications",  
+        "macro_narrative",     
+        "analyses",            
+        "symbol",              
+        "rating",              
+    })
+
+    @staticmethod
+    def _shape_score(parsed) -> int:
+        """How 'agent-output shaped' a JSON candidate looks. Higher is better."""
+        if not isinstance(parsed, dict):
+            return 0
+        keys = set(parsed.keys())
+        return len(keys & AgentResult._EXPECTED_AGENT_KEYS)
+
     def parse_json(self) -> dict | list | None:
         text = self.raw_text.strip()
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            
+            
+            return parsed
         except json.JSONDecodeError:
             pass
 
-        candidates: list[tuple[int, int, dict | list]] = []
+        candidates: list[tuple[int, int, int, dict | list]] = []
+        
         idx = 0
+        
         for match in re.finditer(r"```(?:json)?\s*\n(.*?)\n```", self.raw_text, re.DOTALL):
             try:
                 parsed = json.loads(match.group(1).strip())
             except json.JSONDecodeError:
                 continue
-            candidates.append((len(json.dumps(parsed)), idx, parsed))
+            candidates.append((self._shape_score(parsed), len(json.dumps(parsed)), idx, parsed))
             idx += 1
 
         decoder = json.JSONDecoder()
@@ -46,11 +78,14 @@ class AgentResult:
                 parsed, end = decoder.raw_decode(self.raw_text[i:])
             except json.JSONDecodeError:
                 continue
-            candidates.append((len(json.dumps(parsed)), idx, parsed))
+            candidates.append((self._shape_score(parsed), len(json.dumps(parsed)), idx, parsed))
             idx += 1
         if candidates:
             
-            return max(candidates, key=lambda item: (item[0], item[1]))[2]
+            
+            
+            
+            return max(candidates, key=lambda item: (item[0], item[1], item[2]))[3]
 
         logger.warning("Failed to parse agent response as JSON: %s", self.raw_text[:200])
         return None
