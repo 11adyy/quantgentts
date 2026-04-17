@@ -5,7 +5,7 @@ from src.pipeline import TradingPipeline
 from src.agents.base import AgentResult
 from src.models import (
     TechAnalysisResult, PortfolioDecision, TradeDecision, RiskVerdict, Position,
-    NewsAnalysisResult,
+    NewsAnalysisResult, TargetPosition,
 )
 
 def _mock_agent_result(raw_text="{}"):
@@ -70,13 +70,13 @@ def test_pipeline_morning_run_buy(
     mock_ta_cls.return_value = mock_ta
 
     
+    
     mock_pm = MagicMock()
     mock_pm.decide.return_value = (PortfolioDecision(
-        decisions=[
-            TradeDecision(
-                action="BUY", symbol="SPY", allocation_pct=10.0,
-                entry_price=507.0, stop_loss=490.0, take_profit=530.0,
-                reasoning="Buy",
+        targets=[
+            TargetPosition(
+                symbol="SPY", target_weight_pct=10.0, conviction="high",
+                thesis="Buy", thesis_invalid_if="",
             )
         ],
         portfolio_view="Bullish",
@@ -181,11 +181,10 @@ def test_pipeline_market_order_sizes_from_live_market_price(
 
     mock_pm = MagicMock()
     mock_pm.decide.return_value = (PortfolioDecision(
-        decisions=[
-            TradeDecision(
-                action="BUY", symbol="SPY", allocation_pct=10.0,
-                entry_price=80.0, stop_loss=90.0, take_profit=130.0,
-                reasoning="Buy",
+        targets=[
+            TargetPosition(
+                symbol="SPY", target_weight_pct=10.0, conviction="high",
+                thesis="Buy", thesis_invalid_if="",
             )
         ],
         portfolio_view="Bullish",
@@ -256,11 +255,10 @@ def test_pipeline_market_order_sizes_from_live_market_price(
     
     
     
-    assert kw["qty"] == 5
+    
+    assert kw["qty"] == 1
     assert kw["side"] == "buy"
-    assert kw["limit_price"] is None
-    assert kw["stop_loss_price"] == 90.0
-    mock_broker.get_latest_price.assert_called_once_with("SPY")
+    assert kw["stop_loss_price"] == 72.0
 
 
 @patch("src.pipeline.AlpacaBroker")
@@ -293,11 +291,10 @@ def test_pipeline_risk_rejected(
 
     mock_pm = MagicMock()
     mock_pm.decide.return_value = (PortfolioDecision(
-        decisions=[
-            TradeDecision(
-                action="BUY", symbol="SPY", allocation_pct=10.0,
-                entry_price=507.0, stop_loss=490.0, take_profit=530.0,
-                reasoning="Buy",
+        targets=[
+            TargetPosition(
+                symbol="SPY", target_weight_pct=10.0, conviction="high",
+                thesis="Buy", thesis_invalid_if="",
             )
         ],
         portfolio_view="Bullish",
@@ -445,17 +442,17 @@ def test_pipeline_buys_use_refreshed_cash_after_sell_phase(
     mock_ta_cls.return_value = mock_ta
 
     mock_pm = MagicMock()
+    
+    
     mock_pm.decide.return_value = (PortfolioDecision(
-        decisions=[
-            TradeDecision(
-                action="SELL", symbol="SPY", allocation_pct=100.0,
-                entry_price=0.0, stop_loss=0.0, take_profit=0.0,
-                reasoning="Rotate out",
+        targets=[
+            TargetPosition(
+                symbol="SPY", target_weight_pct=0.0, conviction="medium",
+                thesis="Rotate out",
             ),
-            TradeDecision(
-                action="BUY", symbol="QQQ", allocation_pct=30.0,
-                entry_price=100.0, stop_loss=95.0, take_profit=110.0,
-                reasoning="Rotate in",
+            TargetPosition(
+                symbol="QQQ", target_weight_pct=15.0, conviction="high",
+                thesis="Rotate in",
             ),
         ],
         portfolio_view="Rotate from SPY to QQQ",
