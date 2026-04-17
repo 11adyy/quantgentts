@@ -64,6 +64,10 @@ class TechAnalysisResult(BaseModel):
     
     
     thesis_invalid_if: str = ""
+    
+    
+    
+    signal_age_days: int | None = None
 
     @computed_field
     @property
