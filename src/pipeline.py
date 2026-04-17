@@ -514,6 +514,102 @@ class TradingPipeline:
             lines.append(f"- [{d}] {event} → {syms}")
         return "\n".join(lines)
 
+    def _handle_ex_dividends(self, positions, run_id: str) -> list[dict]:
+        """Lower stops by the upcoming dividend amount the day before ex-div.
+
+        On ex-div day, the stock's open drops by approximately the dividend
+        per share — a mechanical move, not a thesis break. A tight stop set
+        against normal price action can trigger for no real reason and kick
+        us out of a winner. This runs at midday the day BEFORE ex-div and
+        lowers each relevant position's stop by the dividend amount so the
+        mechanical gap doesn't touch it.
+
+        Idempotent per ET date: if we already adjusted this symbol today
+        (tagged 'ex-div' in reasoning), skip. Detects "tomorrow is ex-div"
+        in ET.
+        """
+        from datetime import timedelta as _td
+        orders: list[dict] = []
+        tomorrow = et_today() + _td(days=1)
+
+        for p in positions:
+            if p.qty <= 0:
+                continue
+            
+            try:
+                today_trades = self.db.get_trades(
+                    symbol=p.symbol, today_only=True, limit=20,
+                )
+            except Exception as e:
+                logger.warning("ex-div: today trades lookup failed for %s: %s", p.symbol, e)
+                continue
+            already = any(
+                (t.get("action") or "").upper() == "TRAIL_STOP"
+                and "ex-div" in (t.get("reasoning") or "").lower()
+                for t in today_trades
+            )
+            if already:
+                continue
+
+            try:
+                div = self.market.get_upcoming_ex_dividend(p.symbol)
+            except Exception as e:
+                logger.warning("ex-div: fetch failed for %s: %s", p.symbol, e)
+                continue
+            if not div:
+                continue
+            if div.get("date") != tomorrow:
+                
+                
+                
+                
+                continue
+            amount = div.get("amount") or 0
+            if amount <= 0:
+                continue
+
+            try:
+                current_stop = self.broker.get_current_stop_price(p.symbol)
+            except Exception as e:
+                logger.warning("ex-div: get_current_stop_price failed for %s: %s", p.symbol, e)
+                current_stop = None
+            if current_stop is None or current_stop <= 0:
+                continue  
+            new_stop = round(current_stop - amount, 2)
+            if new_stop <= 0 or new_stop >= p.current_price:
+                logger.warning(
+                    "ex-div: %s skipped — new_stop $%.2f not protective vs current $%.2f",
+                    p.symbol, new_stop, p.current_price,
+                )
+                continue
+            try:
+                order = self.broker.replace_stop_loss(p.symbol, new_stop)
+            except Exception as e:
+                logger.error("ex-div: replace_stop_loss failed for %s: %s", p.symbol, e)
+                continue
+            if not order:
+                continue
+            try:
+                self.db.insert_trade(
+                    symbol=p.symbol, action="TRAIL_STOP", qty=p.qty,
+                    price=new_stop,
+                    reasoning=(
+                        f"ex-div adjustment: ex-div {div['date']}, div ${amount:.4f}/share. "
+                        f"Lowered stop $%.2f → $%.2f to absorb the mechanical open gap."
+                        % (current_stop, new_stop)
+                    ),
+                    run_id=run_id,
+                    stop_loss=new_stop,
+                )
+            except Exception as e:
+                logger.warning("ex-div: audit log failed for %s: %s", p.symbol, e)
+            orders.append(order)
+            logger.info(
+                "Ex-div adjust: %s ex-div %s div $%.4f → stop $%.2f → $%.2f",
+                p.symbol, div["date"], amount, current_stop, new_stop,
+            )
+        return orders
+
     def _auto_take_profit(self, positions, run_id: str,
                           profit_pct_trigger: float = 15.0,
                           trim_fraction: float = 0.33) -> list[dict]:
@@ -1794,6 +1890,11 @@ class TradingPipeline:
             self.db.sync_positions(positions)
 
         
+        
+        
+        exdiv_orders = self._handle_ex_dividends(positions, run_id)
+
+        
         midday_news = self._run_news_update(run_id, session="midday")
         if midday_news:
             logger.info("Midday news: %s", midday_news.pm_briefing[:200])
@@ -1804,7 +1905,7 @@ class TradingPipeline:
         review = None
         
         
-        orders = list(auto_tp_orders)
+        orders = list(auto_tp_orders) + list(exdiv_orders)
         if positions:
             morning_trades = self.db.get_trades(limit=50, today_only=True)
             review, md_result = self.midday_reviewer.review(
