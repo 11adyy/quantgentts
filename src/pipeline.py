@@ -1244,6 +1244,36 @@ class TradingPipeline:
 
         
         
+        
+        
+        
+        
+        
+        has_book_to_check = len(positions) >= 2 or any(
+            d.action == "BUY" for d in portfolio_decision.decisions
+        )
+        if (not correlation_matrix) and has_book_to_check:
+            from src.risk.rules import RiskViolation as _RV
+            rule_violations.append(_RV(
+                rule="correlation_coverage_gap",
+                message=(
+                    "Correlation matrix is empty (insufficient bar data this run). "
+                    "The cluster-concentration advisory is DISABLED. Consider "
+                    "scale_all_buys < 1.0 until coverage returns, especially for "
+                    "thematic names (AI, semis, energy)."
+                ),
+                value=0.0,
+                limit=2.0,  
+            ))
+            logger.warning(
+                "Correlation matrix empty — cluster risk check disabled for this run "
+                "(positions=%d, buy_candidates=%d)",
+                len(positions),
+                sum(1 for d in portfolio_decision.decisions if d.action == "BUY"),
+            )
+
+        
+        
         verdict, rm_result = self.risk_manager.review(
             portfolio_decision=portfolio_decision,
             positions=positions,
