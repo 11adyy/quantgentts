@@ -1601,7 +1601,33 @@ class TradingPipeline:
                     )
                     continue
 
-                qty = int((total_value * decision.allocation_pct / 100) / sizing_price)
+                
+                
+                
+                
+                
+                
+                
+                qty_by_alloc = int((total_value * decision.allocation_pct / 100) / sizing_price)
+                qty_by_risk = None
+                RISK_BUDGET_PCT = 0.5  
+                if decision.stop_loss > 0 and sizing_price > decision.stop_loss:
+                    risk_per_share = sizing_price - decision.stop_loss
+                    if risk_per_share > 0:
+                        risk_dollars = total_value * RISK_BUDGET_PCT / 100
+                        qty_by_risk = int(risk_dollars / risk_per_share)
+                if qty_by_risk is not None and qty_by_risk < qty_by_alloc:
+                    logger.info(
+                        "Vol-adjusted sizing for %s: qty_by_alloc=%d → qty_by_risk=%d "
+                        "(risk %.2f/share, budget $%.0f = %.1f%% of equity)",
+                        decision.symbol, qty_by_alloc, qty_by_risk,
+                        sizing_price - decision.stop_loss,
+                        total_value * RISK_BUDGET_PCT / 100,
+                        RISK_BUDGET_PCT,
+                    )
+                    qty = qty_by_risk
+                else:
+                    qty = qty_by_alloc
                 if qty <= 0:
                     logger.warning("Calculated qty=0 for %s, skipping", decision.symbol)
                     continue

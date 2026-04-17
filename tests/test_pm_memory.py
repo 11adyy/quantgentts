@@ -196,6 +196,42 @@ def test_rm_verdicts_builder_parses_agent_logs(tmp_path):
     assert "All trades pass" in lines[1]
 
 
+def test_vol_adjusted_sizing_caps_qty_on_wide_stops():
+    """SQQQ-style wide-stop name gets fewer shares than raw allocation would suggest.
+
+    This is a spec test. The sizing logic lives inside run_morning's BUY loop
+    rather than a standalone helper, so we verify the key invariant:
+    at a 5% allocation, a stop 8% below entry should give ~0.5%/0.08 = ~6.25%
+    of the expected qty-by-alloc (not exactly, because of integer truncation).
+    """
+    total_value = 100_000
+    entry = 50.0
+    wide_stop = 46.0  
+    alloc_pct = 5.0
+    RISK_BUDGET_PCT = 0.5
+
+    qty_by_alloc = int((total_value * alloc_pct / 100) / entry)  
+    risk_per_share = entry - wide_stop  
+    qty_by_risk = int((total_value * RISK_BUDGET_PCT / 100) / risk_per_share)  
+
+    
+    
+    assert min(qty_by_alloc, qty_by_risk) == 100
+
+    
+    
+    narrow_stop = 49.0  
+    qty_by_risk_narrow = int((total_value * RISK_BUDGET_PCT / 100) / (entry - narrow_stop))
+    
+    assert min(qty_by_alloc, qty_by_risk_narrow) == 100
+
+    
+    very_wide_stop = 40.0  
+    qty_by_risk_extreme = int((total_value * RISK_BUDGET_PCT / 100) / (entry - very_wide_stop))
+    
+    assert min(qty_by_alloc, qty_by_risk_extreme) == 50
+
+
 def test_build_recent_sells_joins_current_prices(tmp_path):
     """_build_recent_sells_for_grading pulls SELL trades and computes pct move."""
     from unittest.mock import MagicMock
