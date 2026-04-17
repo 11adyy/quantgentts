@@ -25,20 +25,21 @@ class AgentResult:
     
     
     
-    _EXPECTED_AGENT_KEYS = frozenset({
-        "decisions",           
-        "approved",            
-        "actions",             
-        "daily_summary",       
-        "tomorrow_outlook",    
-        "regime",              
-        "reasoning_chain",     
-        "investment_implications",  
-        "macro_narrative",     
-        "analyses",            
-        "symbol",              
-        "rating",              
-    })
+    _EXPECTED_AGENT_KEY_WEIGHTS = {
+        "decisions": 50,           
+        "approved": 50,            
+        "actions": 50,             
+        "daily_summary": 40,       
+        "tomorrow_outlook": 40,    
+        "regime": 40,              
+        "investment_implications": 40,  
+        "macro_narrative": 40,     
+        "analyses": 40,            
+        "portfolio_view": 20,      
+        "reasoning_chain": 20,     
+        "symbol": 5,               
+        "rating": 5,               
+    }
 
     @staticmethod
     def _shape_score(parsed) -> int:
@@ -46,7 +47,11 @@ class AgentResult:
         if not isinstance(parsed, dict):
             return 0
         keys = set(parsed.keys())
-        return len(keys & AgentResult._EXPECTED_AGENT_KEYS)
+        return sum(
+            weight
+            for key, weight in AgentResult._EXPECTED_AGENT_KEY_WEIGHTS.items()
+            if key in keys
+        )
 
     def parse_json(self) -> dict | list | None:
         text = self.raw_text.strip()
@@ -81,11 +86,16 @@ class AgentResult:
             candidates.append((self._shape_score(parsed), len(json.dumps(parsed)), idx, parsed))
             idx += 1
         if candidates:
+            max_shape = max(item[0] for item in candidates)
+            if max_shape > 0:
+                
+                
+                shaped = [item for item in candidates if item[0] == max_shape]
+                return max(shaped, key=lambda item: (item[2], item[1]))[3]
+
             
             
-            
-            
-            return max(candidates, key=lambda item: (item[0], item[1], item[2]))[3]
+            return max(candidates, key=lambda item: (item[1], item[2]))[3]
 
         logger.warning("Failed to parse agent response as JSON: %s", self.raw_text[:200])
         return None
