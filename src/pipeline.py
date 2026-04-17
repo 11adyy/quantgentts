@@ -487,21 +487,32 @@ class TradingPipeline:
             if info is None:
                 continue
             status = info.get("status") or ""
+            fill_qty = info.get("filled_qty") or None
+            fill_price = info.get("filled_avg_price") or None
             if status in terminal_ok:
                 self.db.update_trade_fill(
                     broker_order_id=order_id, fill_status="filled",
-                    fill_qty=info.get("filled_qty") or None,
-                    fill_price=info.get("filled_avg_price") or None,
+                    fill_qty=fill_qty,
+                    fill_price=fill_price,
                 )
                 logger.info(
                     "Reconciled %s: filled (qty=%s, avg=$%s)",
-                    order_id, info.get("filled_qty"), info.get("filled_avg_price"),
+                    order_id, fill_qty, fill_price,
                 )
             elif status in terminal_fail:
                 self.db.update_trade_fill(
                     broker_order_id=order_id, fill_status=status,
+                    fill_qty=fill_qty,
+                    fill_price=fill_price,
                 )
-                logger.warning("Reconciled %s: did NOT fill (status=%s)", order_id, status)
+                if fill_qty and float(fill_qty) > 0:
+                    logger.warning(
+                        "Reconciled %s: terminal status=%s with partial fill "
+                        "(qty=%s, avg=$%s)",
+                        order_id, status, fill_qty, fill_price,
+                    )
+                else:
+                    logger.warning("Reconciled %s: did NOT fill (status=%s)", order_id, status)
             
             
 
@@ -1049,7 +1060,7 @@ class TradingPipeline:
         the exit saved capital. Broker lookup errors fall back to 0% (log).
         """
         try:
-            all_rows = self.db.get_trades(limit=200)
+            all_rows = self.db.get_trades(limit=200, executed_only=True)
         except Exception as e:
             logger.warning("recent_sells: db fetch failed: %s", e)
             return []
@@ -1071,7 +1082,7 @@ class TradingPipeline:
             if sell_date < cutoff:
                 continue
             sym = row.get("symbol")
-            sell_price = float(row.get("price") or 0) or 0.0
+            sell_price = float(row.get("fill_price") or row.get("price") or 0) or 0.0
             if not sym or sell_price <= 0:
                 continue
             
@@ -1097,6 +1108,16 @@ class TradingPipeline:
         
         out.sort(key=lambda r: r["sell_date"], reverse=True)
         return out[:10]
+
+    @staticmethod
+    def _actualize_trade_row(row: dict) -> dict:
+        """Prefer broker-confirmed execution details when present."""
+        out = dict(row)
+        if out.get("fill_qty"):
+            out["qty"] = float(out["fill_qty"])
+        if out.get("fill_price"):
+            out["price"] = float(out["fill_price"])
+        return out
 
     @staticmethod
     def _build_macro_tech_alignment(
@@ -2249,64 +2270,66 @@ class TradingPipeline:
             logger.info("Morning run skipped: market closed for non-trading day")
             return {"status": "market_holiday", "orders": [], "run_id": run_id}
 
-        
-        self.broker.cancel_open_entry_orders()
+        try:
+            
+            self.broker.cancel_open_entry_orders()
 
-        
-        account = self.broker.get_account()
-        positions = self.broker.get_positions()
-        cash = account["cash"]
-        total_value = account["portfolio_value"]
-        last_equity = account.get("last_equity", total_value)
-        ctx.account = account
-        ctx.positions = positions
-        ctx.cash = cash
-        ctx.total_value = total_value
-        ctx.last_equity = last_equity
-        logger.info("Account: $%.2f total, $%.2f cash, %d positions (last close $%.2f)",
-                     total_value, cash, len(positions), last_equity)
+            
+            account = self.broker.get_account()
+            positions = self.broker.get_positions()
+            cash = account["cash"]
+            total_value = account["portfolio_value"]
+            last_equity = account.get("last_equity", total_value)
+            ctx.account = account
+            ctx.positions = positions
+            ctx.cash = cash
+            ctx.total_value = total_value
+            ctx.last_equity = last_equity
+            logger.info("Account: $%.2f total, $%.2f cash, %d positions (last close $%.2f)",
+                         total_value, cash, len(positions), last_equity)
 
-        
-        
-        
-        self.morning_research_stage.run(ctx)
-        macro_summary = ctx.macro_summary
-        macro_analysis = ctx.macro_analysis
-        news_intel = ctx.news_intel
-        analyses = ctx.analyses
-        earnings_results = ctx.earnings_results
-        data_status = ctx.data_status
+            
+            
+            
+            self.morning_research_stage.run(ctx)
+            macro_summary = ctx.macro_summary
+            macro_analysis = ctx.macro_analysis
+            news_intel = ctx.news_intel
+            analyses = ctx.analyses
+            earnings_results = ctx.earnings_results
+            data_status = ctx.data_status
 
-        if not analyses:
-            logger.warning("No analyses produced, skipping trading")
-            return {"status": "no_data", "orders": [], "run_id": run_id}
+            if not analyses:
+                logger.warning("No analyses produced, skipping trading")
+                return {"status": "no_data", "orders": [], "run_id": run_id}
 
-        
-        self._decision_stage(ctx)
-        portfolio_decision = ctx.portfolio_decision
+            
+            self._decision_stage(ctx)
+            portfolio_decision = ctx.portfolio_decision
 
-        if not portfolio_decision:
-            logger.info("Portfolio manager: parse failed, no decision object")
-            return {"status": "no_trades", "orders": []}
-        if not portfolio_decision.decisions:
-            logger.info("Portfolio manager + Constructor: no trades suggested")
-            return {"status": "no_trades", "orders": []}
+            if not portfolio_decision:
+                logger.info("Portfolio manager: parse failed, no decision object")
+                return {"status": "no_trades", "orders": [], "run_id": run_id}
+            if not portfolio_decision.decisions:
+                logger.info("Portfolio manager + Constructor: no trades suggested")
+                return {"status": "no_trades", "orders": [], "run_id": run_id}
 
-        
-        early_exit = self._risk_stage(ctx)
-        if early_exit is not None:
-            early_exit["run_id"] = run_id
-            return early_exit
+            
+            early_exit = self._risk_stage(ctx)
+            if early_exit is not None:
+                early_exit["run_id"] = run_id
+                return early_exit
 
-        
-        orders = self._execution_stage(ctx)
+            
+            orders = self._execution_stage(ctx)
 
-        logger.info("=== Morning run complete: %d orders executed ===", len(orders))
-        self._wait_bg_threads(ctx)
-        
-        
-        self._reconcile_fills(ctx)
-        return {"status": "executed", "orders": orders, "run_id": run_id}
+            logger.info("=== Morning run complete: %d orders executed ===", len(orders))
+            return {"status": "executed", "orders": orders, "run_id": run_id}
+        finally:
+            self._wait_bg_threads(ctx)
+            
+            
+            self._reconcile_fills(ctx)
 
     def run_midday(self) -> dict:
         ctx = RunContext.start("midday")
@@ -2409,7 +2432,7 @@ class TradingPipeline:
                 "orders": orders, "run_id": run_id}
 
     def run_earnings_preprocess(self) -> dict:
-        """Pre-market earnings analysis — fires at 08:00 ET before morning trading.
+        """Pre-market earnings analysis scheduled ahead of the main morning run.
 
         Phase 4 #6 of the architecture work. Previously morning's
         `_run_earnings_check` fired a background thread AT THE SAME TIME as
@@ -2420,7 +2443,7 @@ class TradingPipeline:
 
         Running preprocessing ahead of market open decouples the two
         concerns:
-          - 08:00 ET: download pending filings, run the LLM analysis to
+          - pre-market: download pending filings, run the LLM analysis to
             completion, save + confirm. No time pressure.
           - 09:30 ET: morning trading sees ONLY cached, confirmed analyses
             (is_new=False). No placeholders, no bg threads, PM always has
@@ -2642,6 +2665,11 @@ class TradingPipeline:
         
         
         
+        self._reconcile_fills()
+
+        
+        
+        
         
         
         
@@ -2654,7 +2682,10 @@ class TradingPipeline:
 
         
         macro_summary = self.macro.get_macro_summary()
-        today_trades = self.db.get_trades(limit=20, today_only=True)
+        today_trades = [
+            self._actualize_trade_row(t)
+            for t in self.db.get_trades(limit=20, today_only=True, executed_only=True)
+        ]
         
         
         prior_outlook = self.db.get_latest_insights(before_date=today_str)

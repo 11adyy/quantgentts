@@ -24,11 +24,27 @@ class TradingScheduler:
         schedule = self.config.trading.schedule
 
         
+        h, m = self._parse_time(schedule.earnings_preprocess)
+        self.scheduler.add_job(
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            args=[self.pipeline.run_earnings_preprocess, "earnings_preprocess"],
+            id="earnings_preprocess",
+        )
+
+        
         h, m = self._parse_time(schedule.morning)
         self.scheduler.add_job(
             self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
             args=[self.pipeline.run_morning, "morning"],
             id="morning_run",
+        )
+
+        
+        h, m = self._parse_time(schedule.intra_check)
+        self.scheduler.add_job(
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            args=[self.pipeline.run_intra_check, "intra_check"],
+            id="intra_check",
         )
 
         
@@ -47,8 +63,15 @@ class TradingScheduler:
             id="evening_report",
         )
 
-        logger.info("Scheduler configured: morning=%s, midday=%s, evening=%s",
-                     schedule.morning, schedule.midday, schedule.evening)
+        logger.info(
+            "Scheduler configured: earnings_preprocess=%s, morning=%s, "
+            "intra_check=%s, midday=%s, evening=%s",
+            schedule.earnings_preprocess,
+            schedule.morning,
+            schedule.intra_check,
+            schedule.midday,
+            schedule.evening,
+        )
 
     def _run_safe(self, func, name: str):
         try:
