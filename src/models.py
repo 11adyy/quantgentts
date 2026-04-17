@@ -169,6 +169,9 @@ class ReasoningChain(BaseModel):
     sizing_logic: str
     portfolio_balance: str
     cash_target: str
+    
+    
+    continuity_check: str = ""
 
 
 class PortfolioDecision(BaseModel):
