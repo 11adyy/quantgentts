@@ -118,6 +118,10 @@ class TradingPipeline:
             secret_key=config.api_keys.alpaca_secret,
             paper=config.alpaca.paper,
         )
+        
+        
+        
+        self.market.set_fallback_bars(self.broker.get_bars)
         self.db = Database(config.storage.db_path)
         self.db.initialize()
         
