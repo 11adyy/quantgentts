@@ -230,6 +230,86 @@ def test_pm_decisions_builder_parses_own_history(tmp_path):
     assert "consistent with 5-day risk-on narrative" in out
 
 
+def test_pm_renders_weight_pct_and_drift_flag():
+    """Each position line shows weight_pct; drift flag appears on concentrated winners."""
+    with patch("anthropic.Anthropic"):
+        agent = PortfolioManagerAgent(api_key="test", model="claude-opus-4-6")
+        
+        drifted = Position(
+            symbol="NVDA", qty=10, avg_entry=100, current_price=150,
+            market_value=1500, unrealized_pnl=500, sector="Technology",
+        )
+        
+        big_but_not_drift = Position(
+            symbol="MSFT", qty=10, avg_entry=140, current_price=140,
+            market_value=1400, unrealized_pnl=28, sector="Technology",
+        )
+        
+        small = Position(
+            symbol="JPM", qty=5, avg_entry=120, current_price=120,
+            market_value=600, unrealized_pnl=0, sector="Financial Services",
+        )
+        msg = agent.build_user_message(
+            analyses=[], positions=[drifted, big_but_not_drift, small],
+            macro_analysis=None, cash_balance=6500.0, total_value=10000.0,
+        )
+        assert "Weight: 15.0%" in msg
+        assert "Weight: 14.0%" in msg
+        assert "Weight: 6.0%" in msg
+        
+        assert "⚠️DRIFT" in msg
+        
+        lines = msg.split("\n")
+        msft_line = next(ln for ln in lines if ln.startswith("- MSFT:"))
+        assert "⚠️DRIFT" not in msft_line
+
+
+def test_clamp_queued_earnings_buys_caps_allocation():
+    from src.models import TradeDecision
+    from src.pipeline import TradingPipeline
+
+    decisions = [
+        TradeDecision(action="BUY", symbol="NVDA", allocation_pct=12.0,
+                      entry_price=100, stop_loss=95, take_profit=110,
+                      reasoning="high conviction"),
+        TradeDecision(action="BUY", symbol="MSFT", allocation_pct=8.0,
+                      entry_price=400, stop_loss=380, take_profit=430,
+                      reasoning="moderate"),
+        TradeDecision(action="SELL", symbol="AAPL", allocation_pct=100,
+                      entry_price=200, stop_loss=0, take_profit=0,
+                      reasoning="exit"),
+    ]
+    
+    earnings_results = [
+        {"symbol": "NVDA", "queued": True, "analysis": None,
+         "form_type": "10-Q", "filing_date": "2026-04-18"},
+        {"symbol": "MSFT", "queued": False, "analysis": {"investment_implications": {}}},
+    ]
+    out = TradingPipeline._clamp_queued_earnings_buys(decisions, earnings_results)
+    nvda = next(d for d in out if d.symbol == "NVDA")
+    msft = next(d for d in out if d.symbol == "MSFT")
+    aapl = next(d for d in out if d.symbol == "AAPL")
+    assert nvda.allocation_pct == 5.0  
+    assert msft.allocation_pct == 8.0   
+    assert aapl.allocation_pct == 100   
+
+
+def test_clamp_queued_earnings_noop_when_nothing_queued():
+    from src.models import TradeDecision
+    from src.pipeline import TradingPipeline
+
+    decisions = [
+        TradeDecision(action="BUY", symbol="NVDA", allocation_pct=12.0,
+                      entry_price=100, stop_loss=95, take_profit=110,
+                      reasoning="x"),
+    ]
+    
+    earnings_results = [{"symbol": "NVDA", "queued": False,
+                         "analysis": {"investment_implications": {}}}]
+    out = TradingPipeline._clamp_queued_earnings_buys(decisions, earnings_results)
+    assert out[0].allocation_pct == 12.0
+
+
 def test_projected_portfolio_flags_sector_overweight(tmp_path):
     """With 3 Tech BUYs at 5% each on top of 30% held Tech, projection → 45%."""
     from src.pipeline import TradingPipeline
