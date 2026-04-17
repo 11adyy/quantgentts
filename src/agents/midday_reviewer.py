@@ -139,7 +139,7 @@ bearish HIGH-conviction state changes touching held symbols, prefer TRAIL_STOP
                cash_balance: float, total_value: float,
                morning_trades: list[dict] | None = None,
                news_intel: NewsIntelligenceReport | None = None,
-               earnings_analyses: list[dict] | None = None) -> tuple[dict | None, "AgentResult"]:
+               earnings_analyses: list[dict] | None = None) -> tuple[MiddayReview | None, "AgentResult"]:
         result = self.run(
             positions=positions,
             macro_summary=macro_summary,
@@ -162,4 +162,4 @@ bearish HIGH-conviction state changes touching held symbols, prefer TRAIL_STOP
             logger.error("Midday review failed schema validation: %s", e)
             return None, result
         
-        return review.model_dump(), result
+        return review, result
