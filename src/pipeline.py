@@ -639,8 +639,18 @@ class TradingPipeline:
                 return {}, None
             
             prior_ratings = self.tech_store.load()
+            
+            
+            valuations: dict[str, dict] = {}
+            for s in symbols_data:
+                sym = s.get("symbol")
+                if sym:
+                    try:
+                        valuations[sym] = self.market.get_valuation_metrics(sym)
+                    except Exception as e:
+                        logger.warning("valuation fetch crashed for %s: %s", sym, e)
             analyses_map, ta_res = self.tech_analyst.analyze_batch(
-                symbols_data, prior_ratings=prior_ratings,
+                symbols_data, prior_ratings=prior_ratings, valuations=valuations,
             )
             
             if analyses_map:
