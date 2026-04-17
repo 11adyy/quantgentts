@@ -181,8 +181,19 @@ class RiskModification(BaseModel):
     reason: str
 
 
+class RiskReasoningChain(BaseModel):
+    """6-step CoT for the risk manager — forces audit trail on the last gate."""
+    rr_audit: str             
+    signal_fidelity: str      
+    correlation_check: str    
+    event_risk: str           
+    sizing_sanity: str        
+    overall: str              
+
+
 class RiskVerdict(BaseModel):
     approved: bool
+    reasoning_chain: RiskReasoningChain | None = None
     modifications: list[RiskModification] = []
     
     
@@ -437,9 +448,19 @@ class EarningsRiskFlags(BaseModel):
     operational_risks: list[str] = []
 
 
+class EarningsReasoningChain(BaseModel):
+    """5-step CoT for fundamental analysis — why sentiment is what it is."""
+    fundamental_quality: str       
+    growth_trajectory: str         
+    strategic_risks: str           
+    management_execution: str      
+    valuation_context: str         
+
+
 class EarningsInvestmentImplications(BaseModel):
     sentiment: Literal["bullish", "bearish", "neutral"]
     conviction: Literal["high", "medium", "low"]
+    reasoning_chain: EarningsReasoningChain | None = None
     key_thesis: str
     bull_case: str = "not disclosed"
     bear_case: str = "not disclosed"
@@ -479,6 +500,40 @@ class EarningsAnalysis(BaseModel):
         if not text:
             raise ValueError("field cannot be empty")
         return text
+
+
+class MiddayAction(BaseModel):
+    action: Literal["SELL", "REDUCE", "TRAIL_STOP", "HOLD"]
+    symbol: str
+    reason: str
+    new_stop_price: float | None = None  
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return _normalize_symbol(value)
+
+    @model_validator(mode="after")
+    def _trail_stop_requires_new_price(self):
+        if self.action == "TRAIL_STOP" and (self.new_stop_price is None or self.new_stop_price <= 0):
+            raise ValueError("TRAIL_STOP requires new_stop_price > 0")
+        return self
+
+
+class MiddayReview(BaseModel):
+    actions: list[MiddayAction] = []
+    overall_assessment: str
+    risk_level: Literal["low", "moderate", "elevated", "high"]
+
+
+class EveningReport(BaseModel):
+    daily_summary: str
+    lessons: str
+    tomorrow_outlook: str
+    risk_rating: Literal["low", "moderate", "elevated", "high"]
+    suggested_actions: list[str] = []
+    
+    previous_outlook_assessment: str = ""
 
 
 class AgentLog(BaseModel):
