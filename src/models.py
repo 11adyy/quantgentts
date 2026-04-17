@@ -41,18 +41,64 @@ class TechnicalIndicators(BaseModel):
         return _normalize_symbol(value)
 
 
+class TechReasoningChain(BaseModel):
+    """5-step CoT for a single symbol — forces the LLM to show its work per framework step."""
+    trend: str                 
+    momentum: str              
+    volatility: str            
+    volume: str                
+    support_resistance: str    
+
+
 class TechAnalysisResult(BaseModel):
     symbol: str
     rating: Literal["strong_buy", "buy", "neutral", "sell", "strong_sell"]
+    conviction: Literal["high", "medium", "low"] = "medium"
     entry_price: float | None = None
-    exit_price: float | None = None
+    reference_target: float | None = None  
     stop_loss: float | None = None
-    reasoning: str
+    reasoning_chain: TechReasoningChain | None = None
+    reasoning: str  
 
     @field_validator("symbol")
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
         return _normalize_symbol(value)
+
+    @model_validator(mode="after")
+    def _validate_rating_price_consistency(self):
+        """Enforce price fields match the rating's actionability.
+
+        - Actionable (strong_buy, buy, sell, strong_sell): entry_price AND stop_loss required.
+        - Stop must be on the protective side of entry (stop < entry for BUYs, stop > entry for SELLs).
+        - Neutral: prices should be null; we don't hard-fail but clear them to avoid stale hints.
+        """
+        if self.rating == "neutral":
+            
+            self.__dict__["entry_price"] = None
+            self.__dict__["reference_target"] = None
+            self.__dict__["stop_loss"] = None
+            return self
+
+        if self.entry_price is None or self.entry_price <= 0:
+            raise ValueError(
+                f"{self.symbol}: rating={self.rating} requires entry_price > 0"
+            )
+        if self.stop_loss is None or self.stop_loss <= 0:
+            raise ValueError(
+                f"{self.symbol}: rating={self.rating} requires stop_loss > 0"
+            )
+        if self.rating in ("buy", "strong_buy"):
+            if self.stop_loss >= self.entry_price:
+                raise ValueError(
+                    f"{self.symbol}: BUY stop_loss {self.stop_loss} must be below entry {self.entry_price}"
+                )
+        else:  
+            if self.stop_loss <= self.entry_price:
+                raise ValueError(
+                    f"{self.symbol}: SELL stop_loss {self.stop_loss} must be above entry {self.entry_price}"
+                )
+        return self
 
 
 class TradeDecision(BaseModel):

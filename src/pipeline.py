@@ -486,7 +486,12 @@ class TradingPipeline:
             return intel
 
         def _has_actionable_signal(indicators, symbol: str, bars) -> bool:
-            """Pre-filter: only send symbols with interesting signals to the LLM."""
+            """Pre-filter: only send symbols with interesting signals to the LLM.
+
+            Thresholds are ATR-normalized where appropriate so a highly-volatile 3x
+            ETF (SQQQ) isn't held to the same near-zero MACD bar as a low-vol
+            defensive (PG). Falls back to a percentage of MA20 when ATR is absent.
+            """
             
             held_symbols = {p.symbol for p in positions}
             if symbol in held_symbols:
@@ -497,8 +502,6 @@ class TradingPipeline:
             if indicators.rsi_14 is not None and (indicators.rsi_14 < 35 or indicators.rsi_14 > 65):
                 return True
             
-            
-            
             if indicators.bb_upper and indicators.bb_lower and bars:
                 last_close = bars[-1].close
                 band_width = indicators.bb_upper - indicators.bb_lower
@@ -508,18 +511,27 @@ class TradingPipeline:
                     if abs(last_close - indicators.bb_lower) / band_width < 0.1:
                         return True
             
-            if indicators.macd_hist is not None and indicators.ma_20 and indicators.ma_20 > 0:
-                macd_pct = abs(indicators.macd_hist) / indicators.ma_20
-                if macd_pct < 0.003:
-                    return True
+            
+            if indicators.macd_hist is not None:
+                if indicators.atr_14 and indicators.atr_14 > 0:
+                    if abs(indicators.macd_hist) < 0.2 * indicators.atr_14:
+                        return True
+                elif indicators.ma_20 and indicators.ma_20 > 0:
+                    if abs(indicators.macd_hist) / indicators.ma_20 < 0.003:
+                        return True
             
             if indicators.volume_change_pct is not None and abs(indicators.volume_change_pct) > 50:
                 return True
             
+            
             if indicators.ma_20 and indicators.ma_50:
-                spread = abs(indicators.ma_20 - indicators.ma_50) / indicators.ma_50
-                if spread < 0.02:
-                    return True
+                spread = abs(indicators.ma_20 - indicators.ma_50)
+                if indicators.atr_14 and indicators.atr_14 > 0:
+                    if spread < 0.5 * indicators.atr_14:
+                        return True
+                else:
+                    if spread / indicators.ma_50 < 0.02:
+                        return True
             return False
 
         def _run_tech():
