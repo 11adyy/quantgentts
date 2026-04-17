@@ -1501,6 +1501,7 @@ class TradingPipeline:
                 order = self.broker.submit_order(
                     symbol=decision.symbol, qty=qty, side="sell",
                     limit_price=sell_limit,
+                    reference_price=existing[0].current_price,
                 )
                 if not self._order_accepted(order, decision.symbol, "sell"):
                     continue
@@ -1620,6 +1621,7 @@ class TradingPipeline:
                     limit_price=limit_price,
                     stop_loss_price=decision.stop_loss if decision.stop_loss > 0 else None,
                     
+                    reference_price=market_price,  
                 )
                 
                 
@@ -1713,6 +1715,7 @@ class TradingPipeline:
                         order = self.broker.submit_order(
                             symbol=p.symbol, qty=qty, side="sell",
                             limit_price=emergency_limit,
+                            reference_price=p.current_price,
                         )
                         if not self._order_accepted(order, p.symbol, "sell"):
                             continue
@@ -1811,7 +1814,9 @@ class TradingPipeline:
                                 continue
                             sell_limit = round(existing[0].current_price * 0.995, 2)
                             order = self.broker.submit_order(
-                                symbol=symbol, qty=qty, side="sell", limit_price=sell_limit)
+                                symbol=symbol, qty=qty, side="sell",
+                                limit_price=sell_limit,
+                                reference_price=existing[0].current_price)
                             if not self._order_accepted(order, symbol, "sell"):
                                 continue
                             orders.append(order)
