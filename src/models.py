@@ -552,11 +552,17 @@ class MiddayReview(BaseModel):
 class EveningReport(BaseModel):
     daily_summary: str
     lessons: str
-    tomorrow_outlook: str
+    tomorrow_outlook: str  
     risk_rating: Literal["low", "moderate", "elevated", "high"]
     suggested_actions: list[str] = []
     
     previous_outlook_assessment: str = ""
+    
+    
+    
+    tomorrow_bias: Literal["bullish", "neutral", "bearish"] = "neutral"
+    tomorrow_conviction: Literal["high", "medium", "low"] = "medium"
+    tomorrow_key_risks: list[str] = []
 
 
 class AgentLog(BaseModel):
