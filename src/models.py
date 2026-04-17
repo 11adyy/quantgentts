@@ -206,6 +206,22 @@ class RiskVerdict(BaseModel):
     
     
     scale_all_buys: float = Field(default=1.0, ge=0.0, le=1.0)
+    
+    
+    
+    
+    reason_category: Literal[
+        "clean",             
+        "oversized",         
+        "rr_fail",           
+        "concentration",     
+        "correlation_risk",  
+        "event_risk",        
+        "macro_misalign",    
+        "data_degraded",     
+        "signal_fidelity",   
+        "other",             
+    ] = "clean"
     reasoning: str
 
 
