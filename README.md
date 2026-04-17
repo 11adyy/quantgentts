@@ -213,7 +213,7 @@ pytest tests/ -v    # 189 tests
 **SQLite** (`data/quantgents.db`, WAL mode):
 - Trades (with stop/target, reasoning, actual submitted fill price)
 - Position snapshots (synced each midday — rows for closed symbols are purged)
-- Agent logs (full input/output, tokens, model — auto-pruned after 30 days)
+- Agent logs for all 8 LLM agents including earnings (full input/output, tokens, model — auto-pruned after 2 years for quarter-over-quarter learning)
 - Daily P&L records
 - Evening insights (cross-session memory)
 
