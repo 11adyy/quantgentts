@@ -1472,6 +1472,24 @@ class TradingPipeline:
                     stop_loss_price=decision.stop_loss if decision.stop_loss > 0 else None,
                     
                 )
+                
+                
+                
+                
+                
+                if not order or not order.get("id"):
+                    logger.error(
+                        "BUY %s: broker returned no order id (payload=%s) — skipping, "
+                        "cash untouched", decision.symbol, order,
+                    )
+                    continue
+                status = (order.get("status") or "").lower()
+                if status in ("rejected", "canceled", "cancelled", "expired", "error"):
+                    logger.error(
+                        "BUY %s: broker rejected order (status=%s) — skipping, cash untouched",
+                        decision.symbol, status,
+                    )
+                    continue
                 orders.append(order)
                 available_cash -= estimated_cost
                 
