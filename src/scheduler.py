@@ -56,6 +56,16 @@ class TradingScheduler:
         )
 
         
+        
+        
+        h, m = self._parse_time(schedule.close)
+        self.scheduler.add_job(
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            args=[self.pipeline.run_close, "close"],
+            id="close_check",
+        )
+
+        
         h, m = self._parse_time(schedule.evening)
         self.scheduler.add_job(
             self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
@@ -65,11 +75,12 @@ class TradingScheduler:
 
         logger.info(
             "Scheduler configured: earnings_preprocess=%s, morning=%s, "
-            "intra_check=%s, midday=%s, evening=%s",
+            "intra_check=%s, midday=%s, close=%s, evening=%s",
             schedule.earnings_preprocess,
             schedule.morning,
             schedule.intra_check,
             schedule.midday,
+            schedule.close,
             schedule.evening,
         )
 
