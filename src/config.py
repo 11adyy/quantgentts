@@ -59,6 +59,13 @@ class RiskConfig(BaseModel):
     max_daily_loss_pct: float
     max_sector_pct: float
     require_stop_loss: bool
+    
+    
+    
+    
+    
+    
+    allow_margin: bool = False
 
 
 class ScheduleConfig(BaseModel):
