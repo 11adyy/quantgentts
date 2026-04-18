@@ -269,7 +269,13 @@ class TradingPipeline:
                 held = next((p for p in positions if p.symbol == d.symbol), None)
                 if held is None or held.qty <= 0:
                     continue
-                frac = 1.0 if d.allocation_pct >= 100 or d.allocation_pct <= 0 else d.allocation_pct / 100.0
+                
+                
+                
+                
+                if d.allocation_pct <= 0:
+                    continue
+                frac = 1.0 if d.allocation_pct >= 100 else d.allocation_pct / 100.0
                 sell_proceeds += held.market_value * frac
         effective_cash = None if cash is None else cash + sell_proceeds
 
@@ -1877,11 +1883,6 @@ class TradingPipeline:
                 logger.error("Midday order failed for %s: %s", symbol, e)
         return orders
 
-    
-    
-    
-    _FORCE_DELEVER_FLOOR_USD = 1.0
-
     def _force_delever(self, ctx: RunContext) -> list[dict]:
         """Safety net for `allow_margin=False` accounts.
 
@@ -1911,7 +1912,8 @@ class TradingPipeline:
         risk_cfg = getattr(getattr(self, "config", None), "risk", None)
         if risk_cfg is None or bool(getattr(risk_cfg, "allow_margin", False)):
             return []
-        if ctx.cash >= -self._FORCE_DELEVER_FLOOR_USD:
+        from src.risk.constants import MARGIN_DEFICIT_FLOOR_USD
+        if ctx.cash >= -MARGIN_DEFICIT_FLOOR_USD:
             return []
 
         deficit = -ctx.cash
@@ -1931,7 +1933,12 @@ class TradingPipeline:
 
         
         
-        targets = sorted(sellable, key=lambda p: (p.unrealized_pnl, -p.market_value))
+        
+        
+        targets = sorted(
+            sellable,
+            key=lambda p: (p.unrealized_pnl, -p.market_value, p.symbol),
+        )
 
         orders: list[dict] = []
         projected_proceeds = 0.0
