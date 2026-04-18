@@ -19,7 +19,6 @@ its own mutable snapshot.
 
 from __future__ import annotations
 
-import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -68,12 +67,6 @@ class RunContext:
 
     
     orders: list[dict] = field(default_factory=list)
-
-    
-    
-    
-    
-    bg_threads: list[threading.Thread] = field(default_factory=list)
 
     
     

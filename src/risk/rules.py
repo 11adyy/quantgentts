@@ -1,6 +1,9 @@
+import logging
 from dataclasses import dataclass
 from src.config import RiskConfig
 from src.models import TradeDecision, Position
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -57,7 +60,16 @@ class RiskRuleEngine:
             return []
 
         
+        
+        
+        
+        
+        
         if baseline is None or baseline <= 0:
+            logger.warning(
+                "daily-loss baseline missing (%s); falling back to current total_value=%.2f",
+                baseline, total_value,
+            )
             baseline = total_value
 
         violations = []

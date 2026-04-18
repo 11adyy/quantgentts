@@ -1,6 +1,4 @@
 import logging
-import threading
-import time
 import uuid
 from datetime import date
 from src.trading_calendar import et_today, session_date_key
@@ -162,11 +160,6 @@ class TradingPipeline:
         self.decision_stage = DecisionStage(pipeline=self)
         self.risk_stage = RiskStage(pipeline=self)
         self.execution_stage = ExecutionStage(pipeline=self)
-        
-        
-        
-        
-        self._straggler_bg_threads: list[threading.Thread] = []
 
     @staticmethod
     def _format_qty(qty: float) -> str:
@@ -546,39 +539,6 @@ class TradingPipeline:
                     logger.warning("Reconciled %s: did NOT fill (status=%s)", order_id, status)
             
             
-
-    def _wait_bg_threads(self, ctx: RunContext | None = None, timeout_s: float = 120.0) -> None:
-        """Wait for queued earnings-analysis threads to finish before the run exits.
-
-        daemon=True means they'd get SIGKILL'd if main() returns first — a half-finished
-        LLM response would never call confirm_filing, leaving the filing marked is_new
-        forever and burning tokens on every re-run.
-
-        Joins both this run's threads (ctx.bg_threads) AND any stragglers from
-        prior runs that exceeded the timeout. Threads still alive after the
-        budget are shelved in self._straggler_bg_threads so the NEXT run gets
-        another chance to drain them.
-        """
-        current = list(ctx.bg_threads) if ctx and ctx.bg_threads else []
-        stragglers = list(getattr(self, "_straggler_bg_threads", []) or [])
-        bg = current + stragglers
-        if not bg:
-            return
-        deadline = time.monotonic() + timeout_s
-        for t in bg:
-            remaining = max(0.0, deadline - time.monotonic())
-            if remaining <= 0:
-                break
-            t.join(remaining)
-        alive = [t for t in bg if t.is_alive()]
-        if alive:
-            logger.warning(
-                "_wait_bg_threads: %d/%d background thread(s) still alive after %.0fs — will be killed on process exit",
-                len(alive), len(bg), timeout_s,
-            )
-        
-        
-        self._straggler_bg_threads = alive
 
     def _build_position_history(self, positions) -> dict[str, dict]:
         """L2 memory: for each held symbol, entry context + Tech rating trajectory.
@@ -1507,8 +1467,8 @@ class TradingPipeline:
             preprocess but before a later session). PM sees these and sizes
             down accordingly — better than blocking the session on an LLM.
 
-        No background threads, no session-time token spend, no bg_threads
-        churn. The `run_id` + `session` + `ctx` signature is preserved for
+        No background threads, no session-time token spend. The
+        `run_id` + `session` + `ctx` signature is preserved for
         compatibility with MorningResearchStage's callable injection.
         """
         try:
@@ -1808,7 +1768,6 @@ class TradingPipeline:
             logger.info("=== Morning run complete: %d orders executed ===", len(orders))
             return {"status": "executed", "orders": orders, "run_id": run_id}
         finally:
-            self._wait_bg_threads(ctx)
             
             
             self._reconcile_fills(ctx)
@@ -1917,7 +1876,6 @@ class TradingPipeline:
                      len(positions),
                      review.risk_level if review else "no_positions",
                      len(orders))
-        self._wait_bg_threads(ctx)
         
         
         
@@ -2268,7 +2226,6 @@ class TradingPipeline:
         if analysis:
             logger.info("Summary: %s", analysis.daily_summary)
             logger.info("Tomorrow: %s", analysis.tomorrow_outlook)
-        self._wait_bg_threads(ctx)
         
         
         self._reconcile_fills()
