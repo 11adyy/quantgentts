@@ -144,7 +144,10 @@ Overall sentiment: {news_intel.market_sentiment} ({news_intel.confidence})
         
         
         allow_margin: bool = bool(kwargs.get("allow_margin", True))
-        if not allow_margin and cash_balance < 0:
+        
+        
+        _MARGIN_DEFICIT_FLOOR = 1.0
+        if not allow_margin and cash_balance < -_MARGIN_DEFICIT_FLOOR:
             deficit = -cash_balance
             margin_section = (
                 f"### ⚠️ Cash-only policy — de-lever required\n"
