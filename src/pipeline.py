@@ -2033,8 +2033,19 @@ class TradingPipeline:
             self.broker.cancel_open_entry_orders()
 
             
-            account = self.broker.get_account()
-            positions = self.broker.get_positions()
+            
+            
+            
+            
+            try:
+                account = self.broker.get_account()
+                positions = self.broker.get_positions()
+            except Exception as e:
+                logger.error("Morning: broker snapshot failed: %s", e)
+                return {
+                    "status": "broker_error", "orders": [],
+                    "run_id": run_id, "error": str(e),
+                }
             cash = account["cash"]
             total_value = account["portfolio_value"]
             last_equity = account.get("last_equity", total_value)
