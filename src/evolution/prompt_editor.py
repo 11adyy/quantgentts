@@ -295,7 +295,20 @@ class PromptEditor:
                     period=period,
                 ))
                 return None
-            _atomic_write(prompt_path, new_text)
+            try:
+                _atomic_write(prompt_path, new_text)
+            except OSError as exc:
+                
+                
+                
+                report.rejected.append(Rejection(
+                    agent_name=learning.agent_name,
+                    operation="retract",
+                    learning_text=learning.learning_text,
+                    reason=f"atomic write failed: {exc}",
+                    period=period,
+                ))
+                return None
             return AppliedEdit(
                 agent_name=learning.agent_name, operation="retract",
                 learning_text=learning.learning_text,
@@ -331,7 +344,20 @@ class PromptEditor:
             content_hash=content_hash,
             max_entries=self.config.max_learnings_per_agent,
         )
-        _atomic_write(prompt_path, new_text)
+        try:
+            _atomic_write(prompt_path, new_text)
+        except OSError as exc:
+            
+            
+            
+            report.rejected.append(Rejection(
+                agent_name=learning.agent_name,
+                operation="append",
+                learning_text=learning.learning_text,
+                reason=f"atomic write failed: {exc}",
+                period=period,
+            ))
+            return None
 
         for roll in rolled_off_entries:
             report.rolled_off.append({
@@ -552,20 +578,28 @@ def _append_entry(
 
     
     
-    preamble: list[str] = []
+    
+    
+    
+    
+    
     entry_lines: list[str] = []
+    preamble: list[str] = []
     other: list[str] = []
-    seen_preamble = False
+    first_entry_seen = False
     for line in body_lines:
         if _ENTRY_RE.match(line):
             entry_lines.append(line)
-        elif not seen_preamble and (line.strip().startswith("<!--")
-                                    or line.strip() == ""
-                                    or line.strip().endswith("-->")):
+            first_entry_seen = True
+        elif not first_entry_seen:
+            
+            
+            
             preamble.append(line)
-            if "-->" in line:
-                seen_preamble = True
         else:
+            
+            
+            
             other.append(line)
 
     
@@ -624,7 +658,22 @@ def _remove_entry_by_hash(full_text: str, target_hash: str) -> tuple[str, bool]:
 
 def _atomic_write(path: Path, content: str) -> None:
     """Write `content` to `path` atomically. Using a per-path .tmp next to
-    the target so the rename stays on the same filesystem."""
+    the target so the rename stays on the same filesystem.
+
+    On failure (disk full, permission denied, rename across mount points),
+    raises OSError. Callers wrap this to produce a Rejection rather than
+    recording the would-be edit as a success in the audit log.
+    """
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content)
-    os.replace(str(tmp), str(path))
+    try:
+        os.replace(str(tmp), str(path))
+    except OSError:
+        
+        
+        
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
