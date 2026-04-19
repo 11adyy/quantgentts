@@ -213,8 +213,12 @@ def test_pipeline_market_order_sizes_from_live_market_price(
     mock_config.trading.universe = ["SPY"]
 
     mock_ta = MagicMock()
+    
+    
+    
+    
     spy_analysis = TechAnalysisResult(
-        symbol="SPY", rating="buy", entry_price=80.0,
+        symbol="SPY", rating="buy", entry_price=98.0,
         reference_target=130.0, stop_loss=72.0, reasoning="Bullish",
     )
     mock_ta.analyze_batch.return_value = ({"SPY": spy_analysis}, _mock_agent_result())

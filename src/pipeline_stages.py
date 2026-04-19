@@ -776,13 +776,21 @@ class ExecutionStage:
                 if market_price and market_price > 0:
                     if limit_price is not None:
                         deviation = abs(limit_price - market_price) / market_price
-                        if deviation > 0.10:
+                        if deviation > 0.05:
+                            
+                            
+                            
+                            
+                            
+                            
                             logger.warning(
-                                "LLM entry_price $%.2f for %s is %.1f%% away from market $%.2f, using market order",
-                                decision.entry_price, decision.symbol, deviation * 100, market_price,
+                                "BUY %s skipped: LLM entry_price $%.2f is %.1f%% "
+                                "away from market $%.2f (threshold 5%%). Stop/R/R "
+                                "computed against stale entry would be unsafe.",
+                                decision.symbol, decision.entry_price,
+                                deviation * 100, market_price,
                             )
-                            limit_price = None
-                            sizing_price = market_price
+                            continue
                         elif limit_price < market_price:
                             logger.info(
                                 "Adjusting limit price for %s: $%.2f → $%.2f (raised to market)",
