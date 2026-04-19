@@ -339,6 +339,11 @@ class DecisionStage:
         )
         calibration_note = pipeline._build_calibration_note()
         macro_tech_alignment = pipeline._build_macro_tech_alignment(macro_analysis, analyses)
+        
+        
+        
+        recent_missed_lessons = pipeline._build_recent_missed_lessons()
+        recent_loss_pits = pipeline._build_recent_loss_pits()
         pm_facts = pipeline._build_pm_facts(
             positions=positions, analyses=analyses,
             total_value=total_value, cash=cash,
@@ -365,6 +370,8 @@ class DecisionStage:
             projected_portfolio=projected_portfolio,
             calibration_note=calibration_note,
             macro_tech_alignment=macro_tech_alignment,
+            recent_missed_lessons=recent_missed_lessons,
+            recent_loss_pits=recent_loss_pits,
             facts=pm_facts,
             allow_margin=bool(getattr(pipeline.config.risk, "allow_margin", False)),
         )

@@ -692,6 +692,26 @@ class SellGrade(BaseModel):
         return _normalize_symbol(v)
 
 
+
+
+
+
+
+
+
+BuyLossRootCause = Literal[
+    "greed_top_chasing",      
+    "macro_warning_ignored",  
+    "herd_buying",            
+    "averaged_down",          
+    "thesis_broken_held",     
+    "concentration_blow",     
+    "timing_mistake",         
+    "systemic_drawdown",      
+    "tail_event",             
+]
+
+
 class BuyGrade(BaseModel):
     """Structured grade of a recent BUY — did the entry play out?
     Mirrors SellGrade so the feedback loop is symmetric."""
@@ -702,11 +722,124 @@ class BuyGrade(BaseModel):
     pct_move_since_buy: float
     grade: Literal["correct", "premature", "wrong"]
     reason: str = Field(min_length=1)
+    
+    
+    
+    
+    loss_root_cause: BuyLossRootCause | None = None
+    
+    
+    
+    
+    
+    market_relative_move_pct: float | None = None
+    
+    
+    
+    missed_warning_ref: str | None = None
 
     @field_validator("symbol")
     @classmethod
     def _sym(cls, v: str) -> str:
         return _normalize_symbol(v)
+
+    @model_validator(mode="after")
+    def _loss_fields_required(self) -> "BuyGrade":
+        if self.grade == "wrong" and self.loss_root_cause is None:
+            raise ValueError(
+                "BuyGrade with grade='wrong' requires loss_root_cause so the "
+                "quarterly meta-reflector can aggregate patterns"
+            )
+        if (self.loss_root_cause == "macro_warning_ignored"
+                and not (self.missed_warning_ref or "").strip()):
+            raise ValueError(
+                "loss_root_cause='macro_warning_ignored' requires missed_warning_ref "
+                "citing the specific signal that was ignored (agent + date + headline)"
+            )
+        return self
+
+
+class MissedOpportunitySnapshot(BaseModel):
+    """Python-computed facts for one notable mover — INPUT to the evening LLM,
+    not its output. The LLM reads a list of these and writes one
+    MissedOpportunity per interesting row.
+
+    Carries enough signal-state context (prior TA rating, recent news
+    headline, earnings signal, macro sector stance) that the LLM's miss
+    classification has to be grounded in observable prior evidence rather
+    than price retro-rationalization.
+    """
+    symbol: str
+    move_pct: float
+    window_days: int
+    held_during_window: bool
+    had_ta_signal: bool
+    had_news_signal: bool
+    had_earnings_signal: bool
+    source: Literal["universe", "top_mover", "both"]
+    
+    last_ta_rating: str | None = None          
+    last_ta_date: str | None = None            
+    last_news_headline: str | None = None      
+    
+    
+    theme_tags: list[str] = []
+    
+    
+    
+    recent_earnings_signal: str | None = None
+    
+    
+    macro_sector_tailwind: Literal["bullish", "neutral", "bearish", "unknown"] = "unknown"
+
+    @field_validator("symbol")
+    @classmethod
+    def _sym(cls, v: str) -> str:
+        return _normalize_symbol(v)
+
+
+class MissedOpportunity(BaseModel):
+    """Evening-analyst OUTPUT for one snapshot: classified miss + lesson.
+
+    `miss_category` frames the miss through the three lenses the user cares
+    about: catching trends, not missing themes, spotting fundamental
+    mispricing. `noise_rally` and `risk_disciplined` are escape hatches so
+    the LLM isn't forced to label every price move as a miss — but the
+    prompt has to push back when they're overused.
+    """
+    symbol: str
+    move_pct: float
+    miss_category: Literal[
+        "trend_timing_miss",        
+        "theme_blindspot",          
+        "fundamentals_mispricing",  
+        "noise_rally",              
+        "risk_disciplined",         
+    ]
+    
+    
+    
+    
+    theme_if_any: str | None = None
+    lesson: str = Field(min_length=1, max_length=240)
+
+    @field_validator("symbol")
+    @classmethod
+    def _sym(cls, v: str) -> str:
+        return _normalize_symbol(v)
+
+    @model_validator(mode="after")
+    def _theme_required_for_real_misses(self) -> "MissedOpportunity":
+        real_miss_categories = {
+            "trend_timing_miss", "theme_blindspot", "fundamentals_mispricing"
+        }
+        if self.miss_category in real_miss_categories:
+            if not (self.theme_if_any or "").strip():
+                raise ValueError(
+                    f"MissedOpportunity miss_category='{self.miss_category}' "
+                    f"requires theme_if_any so quarterly aggregation can group by theme"
+                )
+        return self
 
 
 class EveningReport(BaseModel):
@@ -734,6 +867,11 @@ class EveningReport(BaseModel):
     
     sell_grades: list[SellGrade] = []
     buy_grades: list[BuyGrade] = []
+    
+    
+    
+    
+    missed_opportunities: list[MissedOpportunity] = []
 
 
 class AgentLog(BaseModel):
