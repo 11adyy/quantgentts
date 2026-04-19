@@ -40,6 +40,10 @@ class LLMConfig(BaseModel):
     position_reviewer_model: str = "claude-opus-4-6"
     evening_analyst_model: str = "claude-opus-4-6"
     
+    
+    
+    meta_reflector_model: str = "claude-opus-4-6"
+    
     max_tokens: int
     
     
@@ -54,6 +58,7 @@ class LLMConfig(BaseModel):
     risk_manager_max_tokens: int | None = None
     position_reviewer_max_tokens: int | None = None
     evening_analyst_max_tokens: int | None = None
+    meta_reflector_max_tokens: int | None = None
 
     @field_validator("max_tokens")
     @classmethod
@@ -75,6 +80,7 @@ class LLMConfig(BaseModel):
         "risk_manager_max_tokens",
         "position_reviewer_max_tokens",
         "evening_analyst_max_tokens",
+        "meta_reflector_max_tokens",
     )
     @classmethod
     def _per_agent_max_tokens_sane(cls, v: int | None) -> int | None:
