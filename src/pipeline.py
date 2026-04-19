@@ -1253,7 +1253,10 @@ class TradingPipeline:
             return []
         from datetime import date as _date, timedelta as _td
         cutoff = et_today() - _td(days=lookback_days)
-        sell_actions = ("SELL", "EMERGENCY_SELL", "FORCE_DELEVER")
+        
+        
+        
+        sell_actions = ("SELL", "EMERGENCY_SELL", "FORCE_DELEVER", "REDUCE")
         out: list[dict] = []
         for row in all_rows:
             action = row.get("action") or ""
@@ -3571,7 +3574,15 @@ class TradingPipeline:
 
         
         
-        self._force_delever(ctx)
+        forced_orders = self._force_delever(ctx)
+        if forced_orders:
+            
+            
+            
+            
+            
+            
+            self._reconcile_fills(ctx)
         positions = ctx.positions
         cash = ctx.cash
         total_value = ctx.total_value

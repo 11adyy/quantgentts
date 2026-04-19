@@ -279,3 +279,53 @@ def test_compute_trade_calibration_excludes_unfilled(tmp_path):
     
     assert stats["n"] == 3
     assert stats["win_rate_pct"] == 100.0
+
+
+def test_compute_trade_calibration_counts_reduce_and_take_profit(tmp_path):
+    """REDUCE (midday reviewer trim) and TAKE_PROFIT (rule-based auto-trim)
+    are real exits that retire FIFO lots. Before the fix they were silently
+    skipped, so PMFacts/calibration undercounted closed trades."""
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+
+    
+    db.insert_trade("AAPL", "BUY", 10, 100.0, "x", "r1",
+                    broker_order_id="b1", fill_status="filled")
+    db.conn.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-10 days') WHERE broker_order_id='b1'"
+    )
+    db.insert_trade("AAPL", "TAKE_PROFIT", 3, 110.0, "x", "r2",
+                    broker_order_id="tp1", fill_status="filled")
+    db.conn.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-3 days') WHERE broker_order_id='tp1'"
+    )
+
+    
+    db.insert_trade("MSFT", "BUY", 5, 200.0, "x", "r1",
+                    broker_order_id="b2", fill_status="filled")
+    db.conn.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-8 days') WHERE broker_order_id='b2'"
+    )
+    db.insert_trade("MSFT", "REDUCE", 5, 220.0, "x", "r2",
+                    broker_order_id="red1", fill_status="filled")
+    db.conn.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-2 days') WHERE broker_order_id='red1'"
+    )
+
+    
+    db.insert_trade("JPM", "BUY", 4, 50.0, "x", "r1",
+                    broker_order_id="b3", fill_status="filled")
+    db.conn.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-7 days') WHERE broker_order_id='b3'"
+    )
+    db.insert_trade("JPM", "SELL", 4, 55.0, "x", "r2",
+                    broker_order_id="s3", fill_status="filled")
+    db.conn.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-1 days') WHERE broker_order_id='s3'"
+    )
+    db.conn.commit()
+
+    stats = db.compute_trade_calibration(lookback_days=30)
+    
+    assert stats["n"] == 3
+    assert stats["win_rate_pct"] == 100.0
