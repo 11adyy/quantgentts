@@ -4272,31 +4272,44 @@ class TradingPipeline:
         )
 
         
-        prev_reflection = load_previous_reflection(today, root_dir=evolution_root)
-        reflection, ev_result = self.meta_reflector.analyze(
-            digest=digest, prev_reflection=prev_reflection,
-        )
-
         
+        
+        
+        
+        prev_reflection = load_previous_reflection(today, root_dir=evolution_root)
+        reflection = None
+        ev_result = None
         try:
-            self.db.insert_agent_log(
-                agent_name="meta_reflector",
-                run_id=f"meta-{digest['period']}",
-                input_summary=(
-                    f"{digest['period']} · "
-                    f"alpha={(digest.get('period_performance') or {}).get('alpha_vs_spy_pct')}"
-                ),
-                input_message=ev_result.user_message,
-                output_summary=(
-                    reflection.style_self_portrait[:200]
-                    if reflection else "parse_error"
-                ),
-                full_response=ev_result.raw_text,
-                model=self.config.llm.meta_reflector_model,
-                tokens_used=ev_result.tokens_used,
+            reflection, ev_result = self.meta_reflector.analyze(
+                digest=digest, prev_reflection=prev_reflection,
             )
         except Exception as exc:
-            logger.warning("meta_reflector agent_log insert failed: %s", exc)
+            logger.error(
+                "meta_reflector.analyze raised; falling back to digest_only: %s",
+                exc, exc_info=True,
+            )
+
+        
+        if ev_result is not None:
+            try:
+                self.db.insert_agent_log(
+                    agent_name="meta_reflector",
+                    run_id=f"meta-{digest['period']}",
+                    input_summary=(
+                        f"{digest['period']} · "
+                        f"alpha={(digest.get('period_performance') or {}).get('alpha_vs_spy_pct')}"
+                    ),
+                    input_message=ev_result.user_message,
+                    output_summary=(
+                        reflection.style_self_portrait[:200]
+                        if reflection else "parse_error"
+                    ),
+                    full_response=ev_result.raw_text,
+                    model=self.config.llm.meta_reflector_model,
+                    tokens_used=ev_result.tokens_used,
+                )
+            except Exception as exc:
+                logger.warning("meta_reflector agent_log insert failed: %s", exc)
 
         if reflection is None:
             logger.error("Meta-reflector returned no valid reflection; "

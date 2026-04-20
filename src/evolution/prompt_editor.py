@@ -469,9 +469,14 @@ class PromptEditor:
             )
             return sha_proc.stdout.strip()
         except subprocess.CalledProcessError as exc:
+            
+            
+            stderr = exc.stderr or ""
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors="replace")
             logger.warning(
                 "prompt_editor git_auto_commit failed (rc=%s): %s",
-                exc.returncode, exc.stderr.decode(errors="replace") if exc.stderr else "",
+                exc.returncode, stderr,
             )
             return None
         except Exception as exc:
