@@ -945,14 +945,14 @@ class MissedOpportunity(BaseModel):
                                 
         "unknown",              
     ] = "unknown"
-    lesson: str = Field(min_length=1, max_length=240)
+    lesson: str = Field(min_length=1, max_length=400)
     
     
     
     
     
     universe_addition_recommendation: Literal["add", "watch", "no"] = "no"
-    universe_addition_reason: str = Field(default="", max_length=240)
+    universe_addition_reason: str = Field(default="", max_length=400)
     """1-2 sentences citing the QUALITY metrics (volume, sustain, theme,
     fundamentals, valuation) that justify a non-'no' recommendation.
     Required when recommendation is "add" or "watch"; must stay empty
