@@ -1,4 +1,5 @@
 import logging
+import socket
 from datetime import date
 
 import pandas as pd
@@ -7,16 +8,27 @@ from fredapi import Fred
 logger = logging.getLogger(__name__)
 
 
+
+
+
+_FRED_TIMEOUT_S = 15.0
+
+
 class MacroDataProvider:
     def __init__(self, api_key: str):
         self.fred = Fred(api_key=api_key)
 
     def _safe_get_series(self, series_id: str, **kwargs) -> pd.Series:
+        
+        prev = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(_FRED_TIMEOUT_S)
         try:
             return self.fred.get_series(series_id, **kwargs)
         except Exception as e:
             logger.warning("FRED API error for %s: %s", series_id, e)
             return pd.Series(dtype=float)
+        finally:
+            socket.setdefaulttimeout(prev)
 
     @staticmethod
     def _staleness_days(series: pd.Series) -> int | None:
