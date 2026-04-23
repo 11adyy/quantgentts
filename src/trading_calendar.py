@@ -40,7 +40,7 @@ SESSION_WINDOWS: dict[str, tuple[int, int]] = {
     "morning":             (570, 720),   
     "intra_check":         (570, 960),   
     "midday":              (780, 870),   
-    "close":               (930, 955),   
+    "close":               (930, 960),   
     "evening":             (1200, 1320), 
 }
 
