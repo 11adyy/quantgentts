@@ -18,6 +18,14 @@ _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
 _DEFAULT_MAX_RETRIES = 5
 
 
+
+
+
+
+
+_LLM_HTTP_TIMEOUT = 60.0
+
+
 def _max_retries() -> int:
     """Read at call time so tests can monkeypatch the env var per case
     without reloading the module."""
@@ -130,10 +138,10 @@ class BaseAgent(ABC):
 
         if self._use_openai:
             from openai import OpenAI
-            self.client = OpenAI(api_key=api_key)
+            self.client = OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
         else:
             from anthropic import Anthropic
-            self.client = Anthropic(api_key=api_key)
+            self.client = Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
 
     @property
     @abstractmethod
