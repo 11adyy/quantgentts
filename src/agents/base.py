@@ -23,7 +23,17 @@ _DEFAULT_MAX_RETRIES = 5
 
 
 
-_LLM_HTTP_TIMEOUT = 60.0
+
+
+
+
+
+
+
+
+
+
+_LLM_HTTP_TIMEOUT = 300.0
 
 
 def _max_retries() -> int:
