@@ -828,8 +828,21 @@ class AlpacaBroker:
                 cancelled_specs.append(spec)
             except Exception as exc:
                 logger.warning("replace_stop_loss: cancel failed for order %s: %s", spec["id"], exc)
-                if not self._list_open_sell_stop_orders(symbol):
-                    self._restore_stop_orders(symbol, cancelled_specs)
+                
+                
+                
+                
+                
+                
+                
+                
+                if cancelled_specs:
+                    restored = self._restore_stop_orders(symbol, cancelled_specs)
+                    logger.warning(
+                        "replace_stop_loss: rolled back %d/%d already-cancelled "
+                        "stop(s) for %s after partial cancel failure",
+                        restored, len(cancelled_specs), symbol,
+                    )
                 return None
 
         
