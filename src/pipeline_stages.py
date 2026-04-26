@@ -759,6 +759,36 @@ class ExecutionStage:
         else:
             price_map = {p.symbol: p.current_price for p in positions}
 
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        if buy_decisions:
+            if not sell_decisions:
+                account, positions, _ = pipeline._refresh_account_state()
+                cash = account["cash"]
+                total_value = account["portfolio_value"]
+                ctx.positions = positions
+                ctx.cash = cash
+                ctx.total_value = total_value
+            daily_pnl_now = total_value - ctx.last_equity
+            loss_violation_now = pipeline.risk_engine.check_daily_loss(
+                ctx.last_equity, daily_pnl_now,
+            )
+            if loss_violation_now:
+                logger.warning(
+                    "ExecutionStage daily-loss re-check: %s — blocking "
+                    "%d BUY(s); intra will liquidate on next tick",
+                    loss_violation_now.message, len(buy_decisions),
+                )
+                buy_decisions = []
+
         available_cash = cash
         for decision in buy_decisions:
             if decision.action != "BUY":
