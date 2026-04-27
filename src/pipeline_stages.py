@@ -676,6 +676,7 @@ class ExecutionStage:
                 logger.warning("Failed to record HOLD decision for %s: %s", d.symbol, e)
 
         sell_order_ids: list[str] = []
+        pending_protections: list[dict] = []
         for decision in sell_decisions:
             try:
                 existing = [p for p in positions if p.symbol == decision.symbol]
@@ -729,10 +730,13 @@ class ExecutionStage:
                 
                 
                 
-                if qty < position_qty:
-                    pipeline._reprotect_residual_after_partial_sell(
-                        decision.symbol, position_qty - qty, stop_specs,
-                    )
+                
+                
+                pending_protections.append({
+                    "order_id": order["id"], "symbol": decision.symbol,
+                    "position_qty_before_sell": position_qty,
+                    "specs": stop_specs,
+                })
                 orders.append(order)
                 sell_order_ids.append(order["id"])
                 pipeline.db.insert_trade(
@@ -755,6 +759,15 @@ class ExecutionStage:
                     "Sell order %s did not fill before buy phase (status=%s); buys will use current cash only",
                     order_id, status or "unknown",
                 )
+
+        
+        
+        
+        for prot in pending_protections:
+            pipeline._finalize_protection_after_sell(
+                prot["order_id"], prot["symbol"],
+                prot["position_qty_before_sell"], prot["specs"],
+            )
 
         if sell_decisions:
             account, positions, price_map = pipeline._refresh_account_state()
