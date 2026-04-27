@@ -641,6 +641,25 @@ class TradingPipeline:
                 "filled_qty=%s",
                 symbol, status, fill_info.get("filled_qty"),
             )
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            if status not in self._TERMINAL_ORDER_STATUSES:
+                logger.warning(
+                    "Cancel of lingering SELL on %s did not converge to "
+                    "terminal within 5s (post-cancel status=%s) — skipping "
+                    "protection finalize. Position currently has no stops "
+                    "and a maybe-still-live SELL; next session reconcile "
+                    "will rebuild coverage.",
+                    symbol, status or "?",
+                )
+                return
 
         fill_qty_raw = fill_info.get("filled_qty")
         try:
