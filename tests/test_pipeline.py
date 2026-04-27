@@ -1620,10 +1620,11 @@ def test_pipeline_buys_use_refreshed_cash_after_sell_phase(
     mock_broker.get_account.side_effect = [
         {"cash": 500.0, "portfolio_value": 10000.0, "last_equity": 10000.0},
         {"cash": 500.0, "portfolio_value": 10000.0, "last_equity": 10000.0},
+        {"cash": 500.0, "portfolio_value": 10000.0, "last_equity": 10000.0},
         {"cash": 3500.0, "portfolio_value": 10000.0, "last_equity": 10000.0},
     ]
     mock_broker.get_positions.side_effect = [
-        [spy_position], [spy_position], [],
+        [spy_position], [spy_position], [spy_position], [],
     ]
     mock_broker.wait_for_order_terminal.return_value = "filled"
     mock_broker.submit_order.side_effect = [

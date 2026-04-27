@@ -3870,6 +3870,19 @@ class TradingPipeline:
             self._decision_stage(ctx)
             portfolio_decision = ctx.portfolio_decision
 
+            
+            
+            
+            
+            
+            
+            
+            late_breach = self._check_late_breach_and_emergency_liquidate(
+                run_id, "post-decision",
+            )
+            if late_breach is not None:
+                return late_breach
+
             if not portfolio_decision:
                 logger.info("Portfolio manager: parse failed, no decision object")
                 return {"status": "no_trades", "orders": [], "run_id": run_id}
