@@ -4104,6 +4104,12 @@ class TradingPipeline:
             }
 
         
+        
+        
+        
+        self._drain_pending_protection_restores()
+
+        
         account = self.broker.get_account()
         positions = self.broker.get_positions()
         cash = account["cash"]
@@ -4442,6 +4448,11 @@ class TradingPipeline:
             logger.info("Intra check skipped: market closed for non-trading day")
             return {"status": "market_holiday", "run_id": run_id}
 
+        
+        
+        
+        self._drain_pending_protection_restores()
+
         try:
             account = self.broker.get_account()
             positions = self.broker.get_positions()
@@ -4576,6 +4587,12 @@ class TradingPipeline:
         if not self._is_trading_day():
             logger.info("Evening run skipped: market closed for non-trading day")
             return {"status": "market_holiday", "analysis": None, "run_id": run_id}
+
+        
+        
+        
+        
+        self._drain_pending_protection_restores()
 
         
         
