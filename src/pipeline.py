@@ -205,6 +205,13 @@ class TradingPipeline:
             max_daily_loss_pct=config.risk.max_daily_loss_pct,
             max_sector_pct=config.risk.max_sector_pct,
             require_stop_loss=config.risk.require_stop_loss,
+            
+            
+            
+            
+            
+            
+            allow_margin=config.risk.allow_margin,
         ))
         self.position_reviewer = PositionReviewerAgent(
             api_key=_key_for(config.llm.position_reviewer_model),
