@@ -4295,6 +4295,15 @@ class TradingPipeline:
         orders = list(auto_tp_orders) + list(exdiv_orders)
 
         if positions:
+            
+            
+            
+            
+            
+            
+            
+            
+            self._reconcile_fills()
             morning_trades = self.db.get_trades(
                 limit=50, today_only=True, executed_only=True,
             )
