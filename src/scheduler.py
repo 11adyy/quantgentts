@@ -1,9 +1,11 @@
 import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from src.config import AppConfig
 from src.pipeline import TradingPipeline
+from src.trading_calendar import SESSION_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,34 @@ class TradingScheduler:
     def _parse_time(self, time_str: str) -> tuple[int, int]:
         parts = time_str.split(":")
         return int(parts[0]), int(parts[1])
+
+    @staticmethod
+    def _build_intra_check_trigger() -> OrTrigger:
+        """OrTrigger covering exactly SESSION_WINDOWS['intra_check'] every 30 min.
+
+        For 09:30-16:00 ET that yields 09:30, 10:00, ..., 15:30, 16:00
+        (14 ticks). Sourced programmatically from SESSION_WINDOWS so any
+        future widening of the canonical window propagates here without
+        a manual edit. Each CronTrigger gets timezone=US/Eastern explicitly
+        — without it APScheduler defaults to local TZ on the *trigger*
+        even when the scheduler itself is set to US/Eastern, and the user
+        may be running --mode live from any host timezone.
+        """
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("US/Eastern")
+
+        lo_min, hi_min = SESSION_WINDOWS["intra_check"]  
+        triggers: list[CronTrigger] = []
+        for tick_min in range(lo_min, hi_min + 1, 30):
+            triggers.append(
+                CronTrigger(
+                    hour=tick_min // 60,
+                    minute=tick_min % 60,
+                    day_of_week="mon-fri",
+                    timezone=et,
+                )
+            )
+        return OrTrigger(triggers)
 
     def setup(self):
         schedule = self.config.trading.schedule
@@ -47,9 +77,14 @@ class TradingScheduler:
         
         
         
+        
+        
+        
+        
+        
         self.scheduler.add_job(
             self._run_safe,
-            CronTrigger(hour="9-15", minute="0,30", day_of_week="mon-fri"),
+            self._build_intra_check_trigger(),
             args=[self.pipeline.run_intra_check, "intra_check"],
             id="intra_check",
         )

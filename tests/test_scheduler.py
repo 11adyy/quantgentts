@@ -88,14 +88,24 @@ def test_scheduler_intra_check_fires_every_30_min_during_market_hours(mock_pipel
     
     
     
-    base = datetime(2026, 4, 20, 8, 0, tzinfo=et)  
+    base = datetime(2026, 4, 20, 8, 0, tzinfo=et)
     fire_times = []
     cur = base
-    for _ in range(6):
+    end_of_day = datetime(2026, 4, 20, 23, 59, tzinfo=et)
+    while True:
         nxt = trigger.get_next_fire_time(None, cur)
-        assert nxt is not None
+        if nxt is None or nxt >= end_of_day:
+            break
         fire_times.append((nxt.hour, nxt.minute))
-        
         cur = nxt.replace(microsecond=1)
 
-    assert fire_times == [(9, 0), (9, 30), (10, 0), (10, 30), (11, 0), (11, 30)]
+    expected = [
+        (9, 30), (10, 0), (10, 30), (11, 0), (11, 30),
+        (12, 0), (12, 30), (13, 0), (13, 30),
+        (14, 0), (14, 30), (15, 0), (15, 30),
+        (16, 0),
+    ]
+    assert fire_times == expected, (
+        f"intra_check must fire on every 30-min tick within the canonical "
+        f"SESSION_WINDOWS window (09:30-16:00 ET inclusive); got {fire_times}"
+    )
