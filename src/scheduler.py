@@ -40,9 +40,16 @@ class TradingScheduler:
         )
 
         
-        h, m = self._parse_time(schedule.intra_check)
+        
+        
+        
+        
+        
+        
+        
         self.scheduler.add_job(
-            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            self._run_safe,
+            CronTrigger(hour="9-15", minute="0,30", day_of_week="mon-fri"),
             args=[self.pipeline.run_intra_check, "intra_check"],
             id="intra_check",
         )
