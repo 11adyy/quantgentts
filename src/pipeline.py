@@ -2984,6 +2984,14 @@ class TradingPipeline:
             "MIDDAY RISK ALERT: %s — force-closing all positions",
             loss_violation.message,
         )
+        
+        
+        
+        
+        
+        
+        
+        self._reconcile_fills()
         orders: list[dict] = []
         for p in positions:
             try:
@@ -3983,6 +3991,13 @@ class TradingPipeline:
             "INTRA RISK ALERT: %s — force-closing all %d positions",
             loss_violation.message, len(positions),
         )
+        
+        
+        
+        
+        
+        
+        self._reconcile_fills()
         orders: list[dict] = []
         for p in positions:
             try:
