@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -15,7 +16,42 @@ _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
 
 
 
-_DEFAULT_MAX_RETRIES = 5
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+_DEFAULT_MAX_RETRIES = 7
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    """Exponential base + full positive jitter on top.
+
+    Returns a sleep duration in [2**attempt, 2 * 2**attempt). The
+    deterministic floor preserves exponential spacing (so retries
+    don't bunch right at the start), while the random ceiling
+    decorrelates retries within a single sequence and across
+    concurrent callers.
+
+    Sequence for attempt 0..5 (the 6 between-attempt sleeps with N=7):
+      [1, 2), [2, 4), [4, 8), [8, 16), [16, 32), [32, 64)
+    """
+    base = 2 ** attempt
+    return base + random.uniform(0, base)
 
 
 
@@ -187,8 +223,8 @@ class BaseAgent(ABC):
                     logger.warning("Agent %s attempt %d failed: %s. Giving up.",
                                    self.name, attempt + 1, e)
                     raise
-                wait = 2 ** attempt
-                logger.warning("Agent %s attempt %d failed: %s. Retrying in %ds...",
+                wait = _retry_backoff_seconds(attempt)
+                logger.warning("Agent %s attempt %d failed: %s. Retrying in %.1fs...",
                                self.name, attempt + 1, e, wait)
                 import time
                 time.sleep(wait)
