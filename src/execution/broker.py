@@ -913,10 +913,26 @@ class AlpacaBroker:
             return order
         except Exception as exc:
             logger.error("replace_stop_loss: failed to submit new stop for %s: %s", symbol, exc)
-            if self._list_open_sell_stop_orders(symbol):
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            cancelled_ids = {
+                str(spec.get("id")) for spec in cancelled_specs if spec.get("id")
+            }
+            visible = self._list_open_sell_stop_orders(symbol)
+            non_cancelled_active = [
+                o for o in visible if str(getattr(o, "id", "")) not in cancelled_ids
+            ]
+            if non_cancelled_active:
                 logger.warning(
-                    "replace_stop_loss: existing protection still visible for %s after failure; leaving stop state unchanged",
-                    symbol,
+                    "replace_stop_loss: %d non-cancelled stop(s) still active for %s after submit failure; leaving stop state unchanged",
+                    len(non_cancelled_active), symbol,
                 )
                 return None
             restored, _failed = self._restore_stop_orders(symbol, cancelled_specs)
