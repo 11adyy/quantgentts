@@ -22,7 +22,9 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from src.agents.base import BaseAgent
-from src.models import EveningReport, NewsIntelligenceReport, Position
+from src.models import (
+    EveningReport, MissedOpportunity, NewsIntelligenceReport, Position,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -523,9 +525,68 @@ upcoming events that bear on held theses. Respond as JSON matching
         if not isinstance(parsed, dict):
             logger.error("Evening analyst expected object, got %s", type(parsed).__name__)
             return None, result
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        parsed = self._drop_invalid_missed_opportunities(parsed)
         try:
             report = EveningReport(**parsed)
         except ValidationError as e:
             logger.error("Evening report failed schema validation: %s", e)
             return None, result
         return report, result
+
+    @staticmethod
+    def _drop_invalid_missed_opportunities(parsed: dict) -> dict:
+        """Pre-validate `missed_opportunities` items individually; drop
+        the malformed ones with a warning so EveningReport construction
+        can proceed on the clean ones.
+
+        Returns the same dict (mutated in place for missed_opportunities;
+        other keys untouched). Non-list / non-dict shapes are also
+        normalized — defensive against LLM emitting None or a stray
+        string.
+        """
+        raw = parsed.get("missed_opportunities")
+        if raw is None:
+            return parsed
+        if not isinstance(raw, list):
+            logger.warning(
+                "Evening analyst: missed_opportunities is %s, not list — "
+                "replacing with empty list", type(raw).__name__,
+            )
+            parsed["missed_opportunities"] = []
+            return parsed
+        valid: list[dict] = []
+        for i, item in enumerate(raw):
+            if not isinstance(item, dict):
+                logger.warning(
+                    "Evening analyst: dropping non-dict missed_opportunities "
+                    "entry at index %d: %r", i, item,
+                )
+                continue
+            try:
+                MissedOpportunity(**item)
+            except ValidationError as e:
+                sym = item.get("symbol") or f"<idx {i}>"
+                logger.warning(
+                    "Evening analyst: dropping malformed missed_opportunities "
+                    "entry for %s: %s", sym, e,
+                )
+                continue
+            valid.append(item)
+        parsed["missed_opportunities"] = valid
+        return parsed
