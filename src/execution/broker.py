@@ -922,19 +922,43 @@ class AlpacaBroker:
             
             
             
+            
+            ACTIVE_STATUSES = {"new", "accepted", "held", "partially_filled"}
+
+            def _is_live_protection(order) -> bool:
+                if str(getattr(order, "id", "")) in cancelled_ids:
+                    return False
+                status_attr = getattr(order, "status", None)
+                status = str(getattr(status_attr, "value", status_attr) or "").lower()
+                return status in ACTIVE_STATUSES
+
+            def _stop_qty(order) -> float:
+                try:
+                    return float(getattr(order, "qty", 0) or 0)
+                except (TypeError, ValueError):
+                    return 0.0
+
             cancelled_ids = {
                 str(spec.get("id")) for spec in cancelled_specs if spec.get("id")
             }
             visible = self._list_open_sell_stop_orders(symbol)
-            non_cancelled_active = [
-                o for o in visible if str(getattr(o, "id", "")) not in cancelled_ids
-            ]
-            if non_cancelled_active:
+            live_stops = [o for o in visible if _is_live_protection(o)]
+            covered_qty = sum(_stop_qty(o) for o in live_stops)
+            position_qty = qty  
+                                
+                                
+                                
+            if live_stops and covered_qty >= position_qty:
                 logger.warning(
-                    "replace_stop_loss: %d non-cancelled stop(s) still active for %s after submit failure; leaving stop state unchanged",
-                    len(non_cancelled_active), symbol,
+                    "replace_stop_loss: %d active stop(s) cover %.4f >= position %.4f for %s after submit failure; leaving stop state unchanged",
+                    len(live_stops), covered_qty, position_qty, symbol,
                 )
                 return None
+            if live_stops:
+                logger.warning(
+                    "replace_stop_loss: %d active stop(s) cover only %.4f of %.4f shares for %s; restoring cancelled specs to close the gap",
+                    len(live_stops), covered_qty, position_qty, symbol,
+                )
             restored, _failed = self._restore_stop_orders(symbol, cancelled_specs)
             if restored == 0:
                 logger.error(
