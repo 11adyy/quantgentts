@@ -2,6 +2,11 @@
 name = "quantgents"
 version = "0.1.0"
 description = "LLM-agent quantitative trading system for US stocks"
+authors = [
+    {name = "Noah Dylan Pelegrini", email = "github@11adyy.dev"},
+]
+license = {text = "MIT"}
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",
