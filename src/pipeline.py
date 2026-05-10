@@ -4565,6 +4565,16 @@ class TradingPipeline:
             logger.info("Earnings preprocess skipped: market closed for non-trading day")
             return {"status": "market_holiday", "run_id": run_id}
 
+        
+        
+        
+        
+        
+        
+        
+        
+        self._drain_pending_protection_restores()
+
         try:
             reports = self.earnings_provider.check_and_fetch(
                 self.config.trading.universe,

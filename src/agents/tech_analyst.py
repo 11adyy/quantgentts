@@ -208,11 +208,27 @@ Current close: {current_price}""")
             return {}, result
 
         items = parsed if isinstance(parsed, list) else [parsed]
+        
+        
+        
+        
+        input_indicators_by_sym: dict[str, float | None] = {}
+        for s in symbols_data:
+            if not isinstance(s, dict):
+                continue
+            sym = s.get("symbol")
+            indicators = s.get("indicators")
+            if sym and indicators is not None:
+                input_indicators_by_sym[sym] = getattr(indicators, "atr_14", None)
         analyses: dict[str, TechAnalysisResult] = {}
         failed_symbols: list[str] = []
         for item in items:
             try:
                 analysis = TechAnalysisResult(**item)
+                
+                atr = input_indicators_by_sym.get(analysis.symbol)
+                if atr is not None:
+                    analysis.atr_14 = atr
                 analyses[analysis.symbol] = analysis
             except Exception as e:
                 bad_symbol = str((item or {}).get("symbol", "?")) if isinstance(item, dict) else "?"

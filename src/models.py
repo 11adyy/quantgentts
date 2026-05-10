@@ -42,12 +42,18 @@ class TechnicalIndicators(BaseModel):
 
 
 class TechReasoningChain(BaseModel):
-    """5-step CoT for a single symbol — forces the LLM to show its work per framework step."""
-    trend: str                 
-    momentum: str              
-    volatility: str            
-    volume: str                
-    support_resistance: str    
+    """5-step CoT for a single symbol — forces the LLM to show its work per
+    framework step. Every field has `min_length=1` so the LLM cannot skip a
+    step by sending an empty string. This matches the discipline already in
+    place on the other CoT chains (Evening / Position / Meta) and closes
+    the audit gap that contradicted the README's 'schema-enforced CoT,
+    LLM cannot skip steps' claim.
+    """
+    trend: str = Field(min_length=1)                 
+    momentum: str = Field(min_length=1)              
+    volatility: str = Field(min_length=1)            
+    volume: str = Field(min_length=1)                
+    support_resistance: str = Field(min_length=1)    
 
 
 class TechAnalysisResult(BaseModel):
@@ -57,7 +63,7 @@ class TechAnalysisResult(BaseModel):
     entry_price: float | None = None
     reference_target: float | None = None  
     stop_loss: float | None = None
-    reasoning_chain: TechReasoningChain | None = None
+    reasoning_chain: TechReasoningChain
     reasoning: str  
     
     
@@ -68,6 +74,14 @@ class TechAnalysisResult(BaseModel):
     
     
     signal_age_days: int | None = None
+    
+    
+    
+    
+    
+    
+    
+    atr_14: float | None = None
 
     @computed_field
     @property
@@ -170,13 +184,19 @@ class TradeDecision(BaseModel):
 
 
 class ReasoningChain(BaseModel):
-    macro_filter: str
-    news_check: str
-    earnings_check: str
-    signal_conflicts: str
-    sizing_logic: str
-    portfolio_balance: str
-    cash_target: str
+    """7-step CoT for the portfolio manager — forces the audit trail on the
+    central decision. Every required field has `min_length=1` so the LLM
+    can't dodge a step with `""`. continuity_check is intentionally
+    optional (defaults to `""`) for backward-compat with pre-memory-layer
+    logs; everything else is mandatory.
+    """
+    macro_filter: str = Field(min_length=1)
+    news_check: str = Field(min_length=1)
+    earnings_check: str = Field(min_length=1)
+    signal_conflicts: str = Field(min_length=1)
+    sizing_logic: str = Field(min_length=1)
+    portfolio_balance: str = Field(min_length=1)
+    cash_target: str = Field(min_length=1)
     
     
     continuity_check: str = ""
@@ -220,7 +240,7 @@ class TargetPosition(BaseModel):
 
 
 class PortfolioDecision(BaseModel):
-    reasoning_chain: ReasoningChain | None = None
+    reasoning_chain: ReasoningChain
     
     targets: list[TargetPosition] = Field(default_factory=list)
     
@@ -241,18 +261,21 @@ class RiskModification(BaseModel):
 
 
 class RiskReasoningChain(BaseModel):
-    """6-step CoT for the risk manager — forces audit trail on the last gate."""
-    rr_audit: str             
-    signal_fidelity: str      
-    correlation_check: str    
-    event_risk: str           
-    sizing_sanity: str        
-    overall: str              
+    """6-step CoT for the risk manager — forces audit trail on the last gate.
+    Every field has `min_length=1` so the LLM can't skip a step by sending
+    `""`. Matches the discipline on the other CoT chains.
+    """
+    rr_audit: str = Field(min_length=1)             
+    signal_fidelity: str = Field(min_length=1)      
+    correlation_check: str = Field(min_length=1)    
+    event_risk: str = Field(min_length=1)           
+    sizing_sanity: str = Field(min_length=1)        
+    overall: str = Field(min_length=1)              
 
 
 class RiskVerdict(BaseModel):
     approved: bool
-    reasoning_chain: RiskReasoningChain | None = None
+    reasoning_chain: RiskReasoningChain
     modifications: list[RiskModification] = []
     
     
@@ -330,13 +353,16 @@ class MacroPositionGuidance(BaseModel):
 
 
 class MacroReasoningChain(BaseModel):
-    """Six-step CoT, one field per step — forces the LLM to walk each stage."""
-    volatility_analysis: str        
-    yield_curve_analysis: str       
-    monetary_policy_analysis: str   
-    inflation_labor_credit: str     
-    cross_signal_synthesis: str     
-    sector_implications: str        
+    """Six-step CoT, one field per step — forces the LLM to walk each stage.
+    Every field has `min_length=1` so the LLM can't skip a step by sending
+    `""`. Matches the discipline on the other CoT chains.
+    """
+    volatility_analysis: str = Field(min_length=1)        
+    yield_curve_analysis: str = Field(min_length=1)       
+    monetary_policy_analysis: str = Field(min_length=1)   
+    inflation_labor_credit: str = Field(min_length=1)     
+    cross_signal_synthesis: str = Field(min_length=1)     
+    sector_implications: str = Field(min_length=1)        
 
 
 class MacroAnalysis(BaseModel):
@@ -524,18 +550,21 @@ class EarningsRiskFlags(BaseModel):
 
 
 class EarningsReasoningChain(BaseModel):
-    """5-step CoT for fundamental analysis — why sentiment is what it is."""
-    fundamental_quality: str       
-    growth_trajectory: str         
-    strategic_risks: str           
-    management_execution: str      
-    valuation_context: str         
+    """5-step CoT for fundamental analysis — why sentiment is what it is.
+    Every field has `min_length=1` so the LLM can't skip a step by sending
+    `""`. Matches the discipline on the other CoT chains.
+    """
+    fundamental_quality: str = Field(min_length=1)       
+    growth_trajectory: str = Field(min_length=1)         
+    strategic_risks: str = Field(min_length=1)           
+    management_execution: str = Field(min_length=1)      
+    valuation_context: str = Field(min_length=1)         
 
 
 class EarningsInvestmentImplications(BaseModel):
     sentiment: Literal["bullish", "bearish", "neutral"]
     conviction: Literal["high", "medium", "low"]
-    reasoning_chain: EarningsReasoningChain | None = None
+    reasoning_chain: EarningsReasoningChain
     key_thesis: str
     bull_case: str = "not disclosed"
     bear_case: str = "not disclosed"

@@ -206,6 +206,19 @@ class PromptEditor:
             
             
             
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
             if (learning.agent_name not in agents_edited
                     and len(agents_edited) >= self.config.max_agents_per_cycle):
                 report.rejected.append(Rejection(
