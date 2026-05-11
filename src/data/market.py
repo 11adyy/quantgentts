@@ -76,8 +76,24 @@ class MarketDataProvider:
         
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        
+        
+        
+        
+        
+        
+        
+        
+        required_cols = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in df.columns]
+        clean_df = df.dropna(subset=required_cols) if required_cols else df
+        if len(clean_df) < len(df):
+            logger.warning(
+                "yfinance returned %d row(s) with NaN OHLCV for %s — dropped; "
+                "%d clean rows remain",
+                len(df) - len(clean_df), symbol, len(clean_df),
+            )
         bars = []
-        for idx, row in df.iterrows():
+        for idx, row in clean_df.iterrows():
             bars.append(
                 OHLCV(
                     date=idx.date(),
@@ -205,9 +221,15 @@ class MarketDataProvider:
                         close = df[etf]["Close"]
                 else:
                     close = df["Close"]
+                
+                
+                
+                
+                close = close.dropna()
                 if len(close) >= 2:
                     pct = ((close.iloc[-1] - close.iloc[0]) / close.iloc[0]) * 100
-                    result[sector] = round(float(pct), 2)
+                    if pd.notna(pct):
+                        result[sector] = round(float(pct), 2)
             except (KeyError, IndexError):
                 continue
         return result
