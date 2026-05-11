@@ -5171,6 +5171,16 @@ class TradingPipeline:
                 logger.info("Pruned %d trades older than 5 years", pruned_t)
         except Exception as e:
             logger.warning("Trades prune failed: %s", e)
+        
+        
+        
+        
+        try:
+            pruned_p = self.db.prune_pending_protection_restores(keep_days=30)
+            if pruned_p:
+                logger.info("Pruned %d stale pending_protection_restores rows", pruned_p)
+        except Exception as e:
+            logger.warning("pending_protection_restores prune failed: %s", e)
 
         logger.info("Evening: value=$%.2f, PnL=$%.2f (%.2f%%), risk=%s",
                      total_value, daily_pnl, daily_return_pct,

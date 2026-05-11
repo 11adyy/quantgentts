@@ -24,6 +24,20 @@ class Database:
             self.conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.DatabaseError:
             pass
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        try:
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            pass
         self._create_tables()
 
     def _create_tables(self):
@@ -187,6 +201,26 @@ class Database:
             self.conn.commit()
         except Exception as e:
             _log.error("Schema migration failed for pending_protection_restores: %s", e)
+
+        
+        
+        
+        
+        
+        
+        
+        for table, col in (
+            ("trades", "timestamp"),
+            ("agent_logs", "timestamp"),
+            ("pending_protection_restores", "created_at"),
+        ):
+            try:
+                self.conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_{col} ON {table}({col})"
+                )
+            except Exception as e:
+                _log.warning("Index creation failed for %s.%s: %s", table, col, e)
+        self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -596,6 +630,44 @@ class Database:
         with self._lock:
             cursor = self.conn.execute(
                 "DELETE FROM trades WHERE timestamp < datetime('now', ?)",
+                (f"-{keep_days} days",),
+            )
+            self.conn.commit()
+            return cursor.rowcount or 0
+
+    def prune_pending_protection_restores(self, keep_days: int = 30) -> int:
+        """Delete pending_protection_restores rows older than keep_days.
+
+        Drain re-attempts these rows every session; a row that survives
+        ~30 calendar days (~20 trading sessions) means either:
+          - broker forgot the sell_order_id (deep history GC),
+          - the underlying position is gone via other paths (manual
+            close, EMERGENCY_SELL during a separate session), or
+          - the row's specs_json is malformed in a way drain can't
+            recover from automatically.
+        In any of these cases, indefinite retention is just operational
+        noise — drain can't help. Logs the symbols pruned at INFO so
+        manual review remains possible. Returns count deleted.
+        """
+        with self._lock:
+            stale = self.conn.execute(
+                "SELECT id, symbol, sell_order_id, created_at "
+                "FROM pending_protection_restores "
+                "WHERE created_at < datetime('now', ?)",
+                (f"-{keep_days} days",),
+            ).fetchall()
+            if not stale:
+                return 0
+            for row in stale:
+                logger.info(
+                    "Pruning stale pending_protection_restore row %d: "
+                    "symbol=%s sell_order_id=%s created_at=%s (>%dd old)",
+                    row["id"], row["symbol"], row["sell_order_id"],
+                    row["created_at"], keep_days,
+                )
+            cursor = self.conn.execute(
+                "DELETE FROM pending_protection_restores "
+                "WHERE created_at < datetime('now', ?)",
                 (f"-{keep_days} days",),
             )
             self.conn.commit()
