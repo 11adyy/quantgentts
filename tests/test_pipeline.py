@@ -1187,7 +1187,16 @@ def test_intra_check_drains_orphan_restores_at_entry(tmp_path):
     pipeline.broker.get_account.return_value = {
         "portfolio_value": 100_500.0, "last_equity": 100_000.0, "cash": 5000.0,
     }
-    pipeline.broker.get_positions.return_value = []
+    
+    
+    from src.models import Position
+    pipeline.broker.get_positions.return_value = [
+        Position(
+            symbol="NVDA", qty=100.0, avg_entry=100.0, current_price=100.0,
+            market_value=10000.0, unrealized_pnl=0.0,
+            unrealized_intraday_pnl=0.0, sector="Tech",
+        ),
+    ]
     pipeline.broker.get_order_fill_info.return_value = {
         "status": "canceled", "filled_qty": "0", "filled_avg_price": None,
     }
@@ -1288,6 +1297,143 @@ def test_drain_does_not_narrow_row_when_no_progress(tmp_path):
     rows = db.get_pending_protection_restores()
     persisted_now = _json.loads(rows[0]["specs_json"])
     assert len(persisted_now) == 2
+    db.close()
+
+
+def test_finalize_skips_restore_when_concurrent_path_fully_exited(tmp_path):
+    """intra_check is exempt from cross-mode session lock, so an
+    EMERGENCY_SELL can fully liquidate the symbol while morning's SELL
+    sits unfilled. After this SELL terminates with no fill, broker now
+    reports 0 shares — restoring stops on a phantom position would have
+    broker reject on insufficient qty → finalize bail → drain replay
+    same bad math → row stuck forever. Pin: when broker shows position=0
+    and our SELL had no fill, skip restore entirely and report success."""
+    from src.storage.db import Database
+    from unittest.mock import MagicMock
+
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    pipeline = TradingPipeline.__new__(TradingPipeline)
+    pipeline.db = db
+    pipeline.broker = MagicMock()
+    pipeline._format_qty = lambda q: str(q)
+
+    cancelled = [{"id": "stop-old", "qty": 100, "stop_price": 95.0}]
+    pipeline.broker.get_order_fill_info.return_value = {
+        "status": "canceled", "filled_qty": "0", "filled_avg_price": None,
+    }
+    
+    pipeline.broker.get_positions.return_value = []
+
+    ok, retry_specs = pipeline._finalize_protection_after_sell(
+        order_id="alpaca-resolved",
+        symbol="NVDA",
+        position_qty_before_sell=100.0,
+        cancelled_specs=cancelled,
+    )
+
+    assert ok is True
+    assert retry_specs == []
+    
+    pipeline.broker._restore_stop_orders.assert_not_called()
+    
+    assert db.get_pending_protection_restores() == []
+    db.close()
+
+
+def test_finalize_clips_residual_when_concurrent_path_partially_exited(tmp_path):
+    """Partial-fill branch: morning's SELL filled 30 of 100 shares
+    (residual math says 70 left). But intra_check concurrently sold
+    50 more — broker actually shows 20 shares. Reprotecting 70 would
+    over-state by 50 → broker rejects. Pin: residual clipped to actual
+    broker position (20), reprotect called with the clipped qty."""
+    from src.storage.db import Database
+    from src.models import Position
+    from unittest.mock import MagicMock
+
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    pipeline = TradingPipeline.__new__(TradingPipeline)
+    pipeline.db = db
+    pipeline.broker = MagicMock()
+    pipeline._format_qty = lambda q: str(q)
+
+    cancelled = [{"id": "stop-old", "qty": 100, "stop_price": 95.0}]
+    pipeline.broker.get_order_fill_info.return_value = {
+        "status": "filled", "filled_qty": "30", "filled_avg_price": "100.0",
+    }
+    
+    pipeline.broker.get_positions.return_value = [
+        Position(
+            symbol="NVDA", qty=20.0, avg_entry=100.0, current_price=100.0,
+            market_value=2000.0, unrealized_pnl=0.0,
+            unrealized_intraday_pnl=0.0, sector="Tech",
+        ),
+    ]
+
+    ok, _ = pipeline._finalize_protection_after_sell(
+        order_id="alpaca-partial",
+        symbol="NVDA",
+        position_qty_before_sell=100.0,
+        cancelled_specs=cancelled,
+    )
+
+    assert ok is True
+    
+    pipeline.broker._submit_stop_limit_order.assert_called_once()
+    kwargs = pipeline.broker._submit_stop_limit_order.call_args.kwargs
+    assert kwargs["qty"] == 20.0, f"expected clipped qty=20, got {kwargs['qty']}"
+    db.close()
+
+
+def test_finalize_collapses_to_reprotect_when_concurrent_reduced_position_no_fill(tmp_path):
+    """fill_qty=0 branch with concurrent partial reduction: our SELL
+    didn't fill, but intra_check sold half the position. Original specs
+    cover 100 shares; broker now has 40. Restoring all specs would
+    over-state. Pin: collapse to single reprotect at most-protective
+    stop_price for actual position (40 shares)."""
+    from src.storage.db import Database
+    from src.models import Position
+    from unittest.mock import MagicMock
+
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    pipeline = TradingPipeline.__new__(TradingPipeline)
+    pipeline.db = db
+    pipeline.broker = MagicMock()
+    pipeline._format_qty = lambda q: str(q)
+
+    cancelled = [
+        {"id": "stop-a", "qty": 60, "stop_price": 94.0},
+        {"id": "stop-b", "qty": 40, "stop_price": 96.0},
+    ]
+    pipeline.broker.get_order_fill_info.return_value = {
+        "status": "canceled", "filled_qty": "0", "filled_avg_price": None,
+    }
+    
+    pipeline.broker.get_positions.return_value = [
+        Position(
+            symbol="NVDA", qty=40.0, avg_entry=100.0, current_price=100.0,
+            market_value=4000.0, unrealized_pnl=0.0,
+            unrealized_intraday_pnl=0.0, sector="Tech",
+        ),
+    ]
+
+    ok, _ = pipeline._finalize_protection_after_sell(
+        order_id="alpaca-resolved",
+        symbol="NVDA",
+        position_qty_before_sell=100.0,
+        cancelled_specs=cancelled,
+    )
+
+    assert ok is True
+    
+    pipeline.broker._restore_stop_orders.assert_not_called()
+    pipeline.broker._submit_stop_limit_order.assert_called_once()
+    kwargs = pipeline.broker._submit_stop_limit_order.call_args.kwargs
+    assert kwargs["qty"] == 40.0
+    
+    assert kwargs["stop_price"] == 96.0
     db.close()
 
 
