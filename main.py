@@ -1,10 +1,12 @@
 import argparse
 import logging
 import sys
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from src.config import load_config
+from src.notifier import TelegramNotifier, format_session_result
 from src.pipeline import TradingPipeline
 from src.scheduler import TradingScheduler
 
@@ -57,12 +59,26 @@ def main():
     config = load_config(config_path)
     logger.info("Config loaded. Universe: %s, Paper: %s", config.trading.universe, config.alpaca.paper)
 
+    notifier = TelegramNotifier()
+
     if args.mode == "live":
+        
+        
+        
+        
+        
+        
+        notifier.send("🟢 quantgents live scheduler starting")
         scheduler = TradingScheduler(config)
         scheduler.setup()
         scheduler.start()
-    else:
-        pipeline = TradingPipeline(config)
+        return
+
+    pipeline = TradingPipeline(config)
+    start = time.monotonic()
+    result = None
+    error: BaseException | None = None
+    try:
         if args.mode == "once" or args.mode == "morning":
             result = pipeline.run_morning()
         elif args.mode == "midday":
@@ -77,7 +93,24 @@ def main():
             result = pipeline.run_earnings_preprocess()
         elif args.mode == "meta":
             result = pipeline.run_quarterly_meta_reflection(force=args.force)
-        logger.info("Result: %s", result)
+    except BaseException as exc:
+        
+        
+        
+        error = exc
+        raise
+    finally:
+        elapsed = time.monotonic() - start
+        message = format_session_result(args.mode, result, elapsed, error=error)
+        if message:
+            
+            
+            
+            try:
+                notifier.send(message)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("notifier crashed in finally: %s", exc)
+    logger.info("Result: %s", result)
 
 
 if __name__ == "__main__":
