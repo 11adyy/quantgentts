@@ -421,6 +421,46 @@ def test_sec_get_raises_after_max_retries(tmp_path, monkeypatch):
         provider._sec_get("https://data.sec.gov/x", max_retries=2)
 
 
+def test_get_recent_filings_tolerates_misaligned_arrays(tmp_path, monkeypatch):
+    """SEC submissions JSON returns parallel arrays. An upstream
+    truncation could leave them desynced. Pin: zip-based iteration
+    survives without IndexError when accessions / primary_docs are
+    shorter than forms / dates."""
+    import json as _json
+    from src.data.earnings import EarningsDataProvider
+
+    monkeypatch.setattr("src.data.earnings.time.sleep", lambda *_a, **_k: None)
+    
+    payload = {
+        "filings": {
+            "recent": {
+                "form": ["10-Q", "10-K", "8-K", "10-Q"],
+                "filingDate": ["2026-04-30", "2026-04-15", "2026-04-10", "2026-03-25"],
+                "accessionNumber": ["0001-23-001", "0001-23-002"],
+                "primaryDocument": ["nvda-10q.html", "nvda-10k.html"],
+            }
+        }
+    }
+
+    def fake_urlopen(req, timeout):
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return _json.dumps(payload).encode()
+        return _Resp()
+    monkeypatch.setattr("src.data.earnings.urlopen", fake_urlopen)
+
+    provider = EarningsDataProvider(data_dir=str(tmp_path), lookback_days=365)
+    filings = provider._get_recent_filings("0001234567", "NVDA")
+    
+    
+    forms_seen = [f.form_type for f in filings]
+    assert "10-Q" in forms_seen
+    assert "10-K" in forms_seen
+    assert len(filings) == 2  
+    
+
+
 def test_sec_get_does_not_retry_on_404(tmp_path, monkeypatch):
     """404 means the URL is wrong (bad CIK / missing filing), not a
     transient rate-limit. Retrying wastes the budget — surface immediately."""

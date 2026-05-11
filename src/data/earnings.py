@@ -246,19 +246,37 @@ class EarningsDataProvider:
         accessions = recent.get("accessionNumber", [])
         primary_docs = recent.get("primaryDocument", [])
 
+        
+        
+        
+        
+        
+        
+        
+        if not (len(forms) == len(dates) == len(accessions) == len(primary_docs)):
+            logger.warning(
+                "SEC submissions arrays misaligned for %s (CIK %s): "
+                "forms=%d dates=%d accessions=%d primary_docs=%d — "
+                "iterating over the shortest",
+                ticker, cik, len(forms), len(dates),
+                len(accessions), len(primary_docs),
+            )
+
         cutoff = (et_now() - timedelta(days=self.lookback_days)).strftime("%Y-%m-%d")
         filings = []
-        for i, form in enumerate(forms):
+        for form, filing_date, accession, primary_doc in zip(
+            forms, dates, accessions, primary_docs,
+        ):
             if form not in ("10-Q", "10-K"):
                 continue
-            if i >= len(dates) or dates[i] < cutoff:
+            if filing_date < cutoff:
                 continue
             filings.append(FilingInfo(
                 symbol=ticker,
                 form_type=form,
-                filing_date=dates[i],
-                accession_number=accessions[i],
-                primary_doc=primary_docs[i] if i < len(primary_docs) else "",
+                filing_date=filing_date,
+                accession_number=accession,
+                primary_doc=primary_doc or "",
             ))
         return filings
 
