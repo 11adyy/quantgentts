@@ -5,7 +5,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from src.config import AppConfig
 from src.pipeline import TradingPipeline
-from src.trading_calendar import SESSION_WINDOWS
+from src.trading_calendar import ET, SESSION_WINDOWS
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,9 @@ class TradingScheduler:
         self.pipeline = TradingPipeline(config)
         
         
-        self.scheduler = BlockingScheduler(timezone="US/Eastern")
+        
+        
+        self.scheduler = BlockingScheduler(timezone=ET)
 
     def _parse_time(self, time_str: str) -> tuple[int, int]:
         parts = time_str.split(":")
@@ -29,14 +31,11 @@ class TradingScheduler:
         For 09:30-16:00 ET that yields 09:30, 10:00, ..., 15:30, 16:00
         (14 ticks). Sourced programmatically from SESSION_WINDOWS so any
         future widening of the canonical window propagates here without
-        a manual edit. Each CronTrigger gets timezone=US/Eastern explicitly
-        — without it APScheduler defaults to local TZ on the *trigger*
-        even when the scheduler itself is set to US/Eastern, and the user
-        may be running --mode live from any host timezone.
+        a manual edit. Each CronTrigger gets timezone=ET explicitly —
+        without it APScheduler defaults to local TZ on the *trigger*
+        even when the scheduler itself is set to ET, and the user may
+        be running --mode live from any host timezone.
         """
-        from zoneinfo import ZoneInfo
-        et = ZoneInfo("US/Eastern")
-
         lo_min, hi_min = SESSION_WINDOWS["intra_check"]  
         triggers: list[CronTrigger] = []
         for tick_min in range(lo_min, hi_min + 1, 30):
@@ -45,7 +44,7 @@ class TradingScheduler:
                     hour=tick_min // 60,
                     minute=tick_min % 60,
                     day_of_week="mon-fri",
-                    timezone=et,
+                    timezone=ET,
                 )
             )
         return OrTrigger(triggers)
