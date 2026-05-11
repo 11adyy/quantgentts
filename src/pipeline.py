@@ -2954,14 +2954,19 @@ class TradingPipeline:
                 value_entry_candidate=value_entry_candidate,
             ))
 
+        
+        
+        
+        
+        
+        
+        
+        
+        snapshots = [s for s in snapshots if not s.held_during_window]
+
         def _priority_key(s) -> tuple:
             any_signal = s.had_ta_signal or s.had_news_signal or s.had_earnings_signal
-            if not s.held_during_window and any_signal:
-                group = 0
-            elif not s.held_during_window:
-                group = 1
-            else:
-                group = 2
+            group = 0 if any_signal else 1
             return (group, -abs(s.move_pct))
 
         snapshots.sort(key=_priority_key)
