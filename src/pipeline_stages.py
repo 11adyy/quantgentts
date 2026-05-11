@@ -337,6 +337,18 @@ class MorningResearchStage:
         ctx.earnings_results = earnings_results
 
         ctx.data_status = data_status
+        
+        
+        
+        
+        
+        
+        degraded = [k for k, v in data_status.items() if v not in ("ok", "empty")]
+        if degraded:
+            logger.error(
+                "Morning research degraded: %s | full status=%s",
+                ",".join(sorted(degraded)), data_status,
+            )
         return ctx
 
 

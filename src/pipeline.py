@@ -1,4 +1,5 @@
 import logging
+import math
 import uuid
 from datetime import date
 from pathlib import Path
@@ -441,6 +442,20 @@ class TradingPipeline:
                 
                 
                 if d.allocation_pct <= 0:
+                    continue
+                
+                
+                
+                
+                
+                
+                
+                if not math.isfinite(held.market_value):
+                    logger.warning(
+                        "SELL pre-sum: skipping %s — broker returned non-finite "
+                        "market_value=%s; cash budget will be conservative",
+                        d.symbol, held.market_value,
+                    )
                     continue
                 frac = 1.0 if d.allocation_pct >= 100 else d.allocation_pct / 100.0
                 sell_proceeds += held.market_value * frac
@@ -3991,9 +4006,28 @@ class TradingPipeline:
         
         
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        from src.risk.rules import _effective_multiplier
+        def _tier(p):
+            return 0 if _effective_multiplier(p.symbol) > 0 else 1
         targets = sorted(
             sellable,
-            key=lambda p: (p.unrealized_pnl, -p.market_value, p.symbol),
+            key=lambda p: (_tier(p), p.unrealized_pnl, -p.market_value, p.symbol),
         )
 
         orders: list[dict] = []
@@ -4220,22 +4254,32 @@ class TradingPipeline:
 
             if not portfolio_decision:
                 logger.info("Portfolio manager: parse failed, no decision object")
-                return {"status": "no_trades", "orders": [], "run_id": run_id}
+                return {
+                    "status": "no_trades", "orders": [], "run_id": run_id,
+                    "data_status": dict(ctx.data_status),
+                }
             if not portfolio_decision.decisions:
                 logger.info("Portfolio manager + Constructor: no trades suggested")
-                return {"status": "no_trades", "orders": [], "run_id": run_id}
+                return {
+                    "status": "no_trades", "orders": [], "run_id": run_id,
+                    "data_status": dict(ctx.data_status),
+                }
 
             
             early_exit = self._risk_stage(ctx)
             if early_exit is not None:
                 early_exit["run_id"] = run_id
+                early_exit["data_status"] = dict(ctx.data_status)
                 return early_exit
 
             
             orders = self._execution_stage(ctx)
 
             logger.info("=== Morning run complete: %d orders executed ===", len(orders))
-            return {"status": "executed", "orders": orders, "run_id": run_id}
+            return {
+                "status": "executed", "orders": orders, "run_id": run_id,
+                "data_status": dict(ctx.data_status),
+            }
         finally:
             
             

@@ -223,7 +223,12 @@ class TargetPosition(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     symbol: str
-    target_weight_pct: float = Field(ge=0.0, le=25.0)
+    
+    
+    
+    
+    
+    target_weight_pct: float = Field(ge=0.0, le=20.0)
     conviction: Literal["high", "medium", "low"] = "medium"
     thesis: str
     thesis_invalid_if: str = ""
