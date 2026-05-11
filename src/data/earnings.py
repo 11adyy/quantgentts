@@ -370,14 +370,59 @@ class EarningsDataProvider:
             return structured_output
 
         
+        
+        
+        
+        
+        
+        
+        
         if len(text) > max_chars:
+            slice_start = self._find_financial_dense_region(text, max_chars)
             logger.info(
                 "Structured extraction too sparse (%d chars); falling back to truncated full text "
-                "(%d → %d chars)",
-                len(structured_output), len(text), max_chars,
+                "(%d → %d chars, slice @ %d)",
+                len(structured_output), len(text), max_chars, slice_start,
             )
-            text = text[:max_chars] + "\n\n[... truncated ...]"
+            text = text[slice_start:slice_start + max_chars] + "\n\n[... truncated ...]"
         return text
+
+    @staticmethod
+    def _find_financial_dense_region(text: str, window: int) -> int:
+        """Return the start index of the `window`-char slice with the
+        highest density of financial-table content.
+
+        Heuristic: count dollar-prefixed amounts (`$1,234`), bare
+        comma-separated thousands (`1,234,567`), and parenthesized
+        negatives (`(123)`). These patterns are dense in income
+        statements, balance sheets, and cash flow statements; sparse
+        in cover pages, TOCs, and XBRL taxonomy boilerplate.
+
+        Returns 0 when text is shorter than window, or when no
+        candidate slice is meaningfully denser than the head — in
+        which case the original behavior (head slice) is preserved.
+        """
+        if len(text) <= window:
+            return 0
+        
+        pattern = re.compile(r"\$[\d,]+(?:\.\d+)?|\d{1,3}(?:,\d{3})+|\(\d{1,3}(?:,\d{3})*\)")
+        step = max(window // 10, 1000)
+        scores: list[tuple[int, int]] = []  
+        for start in range(0, len(text) - window + 1, step):
+            chunk = text[start:start + window]
+            scores.append((len(pattern.findall(chunk)), start))
+        if not scores:
+            return 0
+        best_count, best_start = max(scores, key=lambda x: x[0])
+        head_count = scores[0][0]
+        
+        
+        
+        
+        
+        if best_count >= 2 * max(head_count, 5):
+            return best_start
+        return 0
 
     def _extract_key_sections(self, text: str) -> dict[str, str]:
         """Locate financial / MD&A / risk-factor section bodies via regex.
@@ -396,10 +441,16 @@ class EarningsDataProvider:
         
         
         
+        
+        
+        
+        
+        
+        
         patterns = [
             ("financial_statements", re.compile(
-                r"(?im)(?:condensed\s+)?consolidated\s+statements?\s+of\s+(?:operations?|income)\b"
-            ), "first"),
+                r"(?im)(?:condensed\s+)?consolidated\s+statements?\s+of\s+(?:operations?|income|earnings)\b"
+            ), "skip_toc"),
             ("mdna", re.compile(
                 
                 

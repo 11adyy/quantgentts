@@ -344,18 +344,33 @@ class AlpacaBroker:
 
         gainers = getattr(movers, "gainers", None) or []
         out: list[dict] = []
-        for m in gainers[:n]:
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        _NON_EQUITY_SUFFIXES = (".WS", ".WSA", ".WSB", ".U", ".UN", ".RT")
+        for m in gainers:
             sym = getattr(m, "symbol", None)
             if not sym:
                 continue
+            sym_upper = str(sym).upper()
+            if sym_upper.endswith(_NON_EQUITY_SUFFIXES):
+                continue
             try:
                 out.append({
-                    "symbol": str(sym).upper(),
+                    "symbol": sym_upper,
                     "percent_change": float(getattr(m, "percent_change", 0) or 0),
                     "price": float(getattr(m, "price", 0) or 0),
                 })
             except (TypeError, ValueError):
                 continue
+            if len(out) >= n:
+                break
         return out
 
     def get_bars(self, symbol: str, lookback_days: int = 120) -> list:
