@@ -153,6 +153,22 @@ class PortfolioConstructor:
     ) -> TradeDecision | None:
         if position is None or position.qty <= 0:
             return None
+        
+        
+        
+        
+        
+        
+        
+        
+        import math as _math
+        if not _math.isfinite(current_pct) or current_pct <= 0:
+            logger.warning(
+                "Constructor: SELL %s skipped — current_pct=%s "
+                "(market_value=%s likely NaN/zero from broker glitch)",
+                target.symbol, current_pct, position.market_value,
+            )
+            return None
         if target_pct == 0:
             
             alloc = 100.0
