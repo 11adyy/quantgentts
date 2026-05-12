@@ -65,6 +65,21 @@ def main():
     
     
     
+    
+    
+    
+    if not config.alpaca.paper:
+        logger.warning(
+            "LIVE TRADING ENABLED (alpaca.paper=false). Real-money orders "
+            "will be submitted via the Alpaca API key from .env. To revert "
+            "to paper trading, set `alpaca.paper: true` in your config."
+        )
+
+    
+    
+    
+    
+    
     try:
         refresh_pricing()
     except Exception as exc:

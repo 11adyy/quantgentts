@@ -109,10 +109,10 @@ class LLMConfig(BaseModel):
 
 
 class RiskConfig(BaseModel):
-    max_position_pct: float
-    max_total_position_pct: float
-    max_daily_loss_pct: float
-    max_sector_pct: float
+    max_position_pct: float = Field(gt=0, le=100)
+    max_total_position_pct: float = Field(gt=0)
+    max_daily_loss_pct: float = Field(gt=0, le=100)
+    max_sector_pct: float = Field(gt=0, le=100)
     require_stop_loss: bool
     
     
@@ -133,8 +133,16 @@ class ScheduleConfig(BaseModel):
 
 
 class TradingConfig(BaseModel):
-    universe: list[str]
-    lookback_days: int
+    
+    
+    
+    
+    universe: list[str] = Field(min_length=1)
+    
+    
+    
+    
+    lookback_days: int = Field(ge=1)
     schedule: ScheduleConfig
 
 

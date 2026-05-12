@@ -1668,7 +1668,16 @@ class TradingPipeline:
             ts = (row.get("timestamp") or "")[:10]
             try:
                 data = json.loads(row.get("full_response") or "{}")
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError) as e:
+                
+                
+                
+                
+                
+                logger.warning(
+                    "rm_recent_verdicts: JSON parse failed for row %s: %s",
+                    ts or "?", e,
+                )
                 continue
             approved = data.get("approved")
             mods = data.get("modifications") or []
@@ -1709,7 +1718,14 @@ class TradingPipeline:
             ts = (row.get("timestamp") or "")[:10]
             try:
                 data = json.loads(row.get("full_response") or "{}")
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError) as e:
+                
+                
+                
+                logger.warning(
+                    "pm_recent_decisions: JSON parse failed for row %s: %s",
+                    ts or "?", e,
+                )
                 continue
             
             
@@ -2244,7 +2260,17 @@ class TradingPipeline:
                 continue
             try:
                 items = _json.loads(raw)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as e:
+                
+                
+                
+                
+                
+                logger.warning(
+                    "recent_missed_lessons: JSON parse failed for "
+                    "insights row %s: %s",
+                    row_date or "?", e,
+                )
                 continue
             if not isinstance(items, list):
                 continue
@@ -2727,7 +2753,14 @@ class TradingPipeline:
                 continue
             try:
                 items = _json.loads(raw)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as e:
+                
+                
+                logger.warning(
+                    "recent_loss_pits: JSON parse failed for insights "
+                    "row %s: %s",
+                    (row.get("date") or "?"), e,
+                )
                 continue
             if not isinstance(items, list):
                 continue
