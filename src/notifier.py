@@ -228,6 +228,18 @@ def _append_trade_session_body(lines: list[str], result: dict) -> None:
 def _append_evening_body(lines: list[str], result: dict) -> None:
     
     
+    
+    
+    
+    
+    
+    analysis = result.get("analysis")
+    risk_for_banner = _attr_or_key(analysis, "risk_rating")
+    if isinstance(risk_for_banner, str) and risk_for_banner.lower() in ("elevated", "high"):
+        lines.append(f"🚨 OPERATOR ATTENTION — risk_rating={risk_for_banner}")
+
+    
+    
     daily_pnl = result.get("daily_pnl")
     total_value = result.get("total_value")
     daily_ret = result.get("daily_return_pct")
@@ -271,6 +283,22 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     outlook = _attr_or_key(analysis, "tomorrow_outlook") or ""
     if outlook:
         lines.append(f"   {outlook[:280]}")
+
+    
+    
+    
+    
+    
+    
+    risk_for_actions = _attr_or_key(analysis, "risk_rating")
+    if isinstance(risk_for_actions, str) and risk_for_actions.lower() in ("elevated", "high"):
+        actions = _attr_or_key(analysis, "suggested_actions") or []
+        if isinstance(actions, list) and actions:
+            lines.append("⚡ Suggested actions:")
+            for act in actions[:5]:
+                if not isinstance(act, str):
+                    continue
+                lines.append(f"   • {act[:200]}")
 
 
 def _session_cost_line(run_id: str | None) -> str | None:
