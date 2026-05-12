@@ -6,6 +6,8 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from src.cost_table import estimate_cost, fmt_cost
+
 logger = logging.getLogger(__name__)
 
 
@@ -246,7 +248,6 @@ class BaseAgent(ABC):
         
         
         
-        from src.cost_table import estimate_cost, fmt_cost
         if input_tokens == 0 and output_tokens == 0:
             cost = None
             logger.warning(
