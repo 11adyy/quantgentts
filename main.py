@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from src.config import load_config
+from src.cost_table import refresh_pricing
 from src.notifier import TelegramNotifier, format_session_result
 from src.pipeline import TradingPipeline
 from src.scheduler import TradingScheduler
@@ -58,6 +59,16 @@ def main():
 
     config = load_config(config_path)
     logger.info("Config loaded. Universe: %s, Paper: %s", config.trading.universe, config.alpaca.paper)
+
+    
+    
+    
+    
+    
+    try:
+        refresh_pricing()
+    except Exception as exc:
+        logger.warning("pricing refresh failed at startup: %s", exc)
 
     notifier = TelegramNotifier()
 

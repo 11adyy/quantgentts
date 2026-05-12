@@ -256,7 +256,11 @@ def test_tech_analyst_chunked_merged_cost_sums_when_model_priced(
 
     
     
+    from src.cost_table import PRICING
+    rates = PRICING["claude-opus-4-7"]
+    per_chunk = (80_000 * rates["input"] + 12_000 * rates["output"]) / 1_000_000
+    expected = per_chunk * 2  
     assert merged.cost_usd is not None
-    assert abs(merged.cost_usd - 4.20) < 0.01
+    assert abs(merged.cost_usd - expected) < 0.01
     assert merged.input_tokens == 80_000 * 2
     assert merged.output_tokens == 12_000 * 2
