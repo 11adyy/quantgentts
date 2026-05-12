@@ -261,3 +261,97 @@ def test_parse_json_prefers_later_agent_shaped_correction_over_larger_draft():
     parsed = result.parse_json()
 
     assert parsed == {"approved": False}
+
+
+
+
+def test_run_records_cost_for_known_model():
+    """Happy path: tokens land, model is in PRICING, AgentResult carries
+    cost. claude-opus-4-7 @ 100 in + 50 out = 100×$15/M + 50×$75/M."""
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"x": 1}')]
+        mock_response.usage.input_tokens = 100
+        mock_response.usage.output_tokens = 50
+        mock_response.usage.cache_creation_input_tokens = 0
+        mock_response.usage.cache_read_input_tokens = 0
+        mock_client.messages.create.return_value = mock_response
+        mock_cls.return_value = mock_client
+
+        agent = ConcreteAgent(api_key="t", model="claude-opus-4-7", max_tokens=128)
+        result = agent.run(data="x")
+        expected = (100 * 15 + 50 * 75) / 1_000_000  
+        assert result.cost_usd is not None
+        assert abs(result.cost_usd - expected) < 1e-9
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+
+
+def test_run_flags_cost_none_for_unknown_model():
+    """Model not in PRICING (e.g. typo or new model) → cost_usd=None
+    so the operator sees '$?.??' in the push instead of a fake $0.
+    Token counts must still land correctly."""
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"x": 1}')]
+        mock_response.usage.input_tokens = 100
+        mock_response.usage.output_tokens = 50
+        mock_response.usage.cache_creation_input_tokens = 0
+        mock_response.usage.cache_read_input_tokens = 0
+        mock_client.messages.create.return_value = mock_response
+        mock_cls.return_value = mock_client
+
+        agent = ConcreteAgent(api_key="t", model="claude-opus-99-future", max_tokens=128)
+        result = agent.run(data="x")
+        assert result.cost_usd is None
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+
+
+def test_run_flags_cost_none_when_usage_is_zero_zero():
+    """Rare SDK error path returns 0 input + 0 output tokens. Pre-fix
+    code would silently log cost=$0 (the math is correct but the
+    SEMANTICS are wrong — we don't actually know what we spent).
+    Pin: that case yields cost_usd=None so the operator notices."""
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"x": 1}')]
+        mock_response.usage.input_tokens = 0
+        mock_response.usage.output_tokens = 0
+        mock_response.usage.cache_creation_input_tokens = 0
+        mock_response.usage.cache_read_input_tokens = 0
+        mock_client.messages.create.return_value = mock_response
+        mock_cls.return_value = mock_client
+
+        agent = ConcreteAgent(api_key="t", model="claude-opus-4-7", max_tokens=128)
+        result = agent.run(data="x")
+        
+        
+        assert result.cost_usd is None
+        assert result.tokens_used == 0
+
+
+def test_run_with_anthropic_caching_sums_input_correctly():
+    """When prompt caching is enabled in the future, input is split
+    into input_tokens (uncached) + cache_creation_input_tokens +
+    cache_read_input_tokens. Token COUNT must include all three."""
+    with patch("anthropic.Anthropic") as mock_cls:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text='{"x": 1}')]
+        
+        mock_response.usage.input_tokens = 1000
+        mock_response.usage.cache_creation_input_tokens = 500
+        mock_response.usage.cache_read_input_tokens = 3000
+        mock_response.usage.output_tokens = 200
+        mock_client.messages.create.return_value = mock_response
+        mock_cls.return_value = mock_client
+
+        agent = ConcreteAgent(api_key="t", model="claude-opus-4-7", max_tokens=128)
+        result = agent.run(data="x")
+        
+        assert result.input_tokens == 1000 + 500 + 3000
+        assert result.output_tokens == 200
