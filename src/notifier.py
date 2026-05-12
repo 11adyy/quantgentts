@@ -18,11 +18,20 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+
+
+
+
+
+_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "quantgents.db"
 
 
 class TelegramNotifier:
@@ -282,11 +291,9 @@ def _session_cost_line(run_id: str | None) -> str | None:
         return None
     try:
         import sqlite3
-        from pathlib import Path
-        db_path = Path("data/quantgents.db")
-        if not db_path.exists():
+        if not _DB_PATH.exists():
             return None
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(_DB_PATH))
         try:
             rows = conn.execute(
                 "SELECT cost_usd FROM agent_logs WHERE run_id = ?",
@@ -318,14 +325,12 @@ def _append_position_snapshot(lines: list[str], total_value: float | None) -> No
     error (the rest of the message still goes out)."""
     try:
         import sqlite3
-        from pathlib import Path
         
         
         
-        db_path = Path("data/quantgents.db")
-        if not db_path.exists():
+        if not _DB_PATH.exists():
             return
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(_DB_PATH))
         try:
             rows = conn.execute(
                 "SELECT symbol, qty, avg_entry, current_price, "

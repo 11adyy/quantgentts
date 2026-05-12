@@ -76,6 +76,17 @@ def _apply_litellm_data(data: dict) -> int:
     number of models updated. Models that aren't in LiteLLM keep
     their fallback values — operator can extend _PRICING_FALLBACK
     for those, or LiteLLM may add them in a future commit."""
+    
+    
+    
+    
+    
+    if not isinstance(data, dict):
+        logger.warning(
+            "LiteLLM payload not a dict (got %s) — skipping update",
+            type(data).__name__,
+        )
+        return 0
     updated = 0
     
     
@@ -235,6 +246,11 @@ def fmt_cost(cost_usd: float | None) -> str:
     """
     if cost_usd is None:
         return "$?.??"
+    
+    
+    
+    if cost_usd == 0.0:
+        return "$0.00"
     if cost_usd < 0.01:
         return f"${cost_usd:.4f}"
     return f"${cost_usd:,.2f}"

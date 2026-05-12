@@ -112,7 +112,17 @@ def main():
         raise
     finally:
         elapsed = time.monotonic() - start
-        message = format_session_result(args.mode, result, elapsed, error=error)
+        
+        
+        
+        
+        
+        
+        try:
+            message = format_session_result(args.mode, result, elapsed, error=error)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("format_session_result raised in finally: %s", exc)
+            message = None
         if message:
             
             

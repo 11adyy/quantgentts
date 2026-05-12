@@ -265,9 +265,22 @@ def test_parse_json_prefers_later_agent_shaped_correction_over_larger_draft():
 
 
 
-def test_run_records_cost_for_known_model():
-    """Happy path: tokens land, model is in PRICING, AgentResult carries
-    cost. claude-opus-4-7 @ 100 in + 50 out = 100×$15/M + 50×$75/M."""
+def test_run_records_cost_for_known_model(monkeypatch):
+    """Happy path: tokens land, model is in PRICING, AgentResult carries cost.
+
+    Uses a test-fixture PRICING (input=$10/M, output=$50/M) instead of
+    the live PRICING dict. Reading PRICING for BOTH `expected` and
+    `actual` is tautological — a regression that wiped PRICING to
+    {"input": 0, "output": 0} would pass (both sides agree on $0).
+    Pinned fixture rates force a real math check.
+    """
+    
+    from src import cost_table
+    monkeypatch.setitem(
+        cost_table.PRICING, "claude-opus-4-7",
+        {"input": 10.0, "output": 50.0},
+    )
+
     with patch("anthropic.Anthropic") as mock_cls:
         mock_client = MagicMock()
         mock_response = MagicMock()
@@ -282,11 +295,7 @@ def test_run_records_cost_for_known_model():
         agent = ConcreteAgent(api_key="t", model="claude-opus-4-7", max_tokens=128)
         result = agent.run(data="x")
         
-        
-        
-        from src.cost_table import PRICING
-        rates = PRICING["claude-opus-4-7"]
-        expected = (100 * rates["input"] + 50 * rates["output"]) / 1_000_000
+        expected = (100 * 10.0 + 50 * 50.0) / 1_000_000
         assert result.cost_usd is not None
         assert abs(result.cost_usd - expected) < 1e-9
         assert result.input_tokens == 100
