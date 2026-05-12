@@ -762,6 +762,16 @@ class AlpacaBroker:
             "id": str(order.id),
             "status": str(order.status),
             "symbol": order.symbol,
+            
+            
+            
+            
+            
+            
+            "side": side.lower(),
+            "qty": qty,
+            "limit_price": limit_price,
+            "stop_loss_price": stop_loss_price if use_stop else None,
         }
 
     def close_position(self, symbol: str) -> dict:
