@@ -800,7 +800,23 @@ class ExecutionStage:
                 logger.error("Order failed for %s %s: %s", decision.action, decision.symbol, e)
 
         for order_id in sell_order_ids:
-            status = pipeline.broker.wait_for_order_terminal(order_id)
+            
+            
+            
+            
+            
+            
+            
+            
+            try:
+                status = pipeline.broker.wait_for_order_terminal(order_id)
+            except Exception as e:
+                logger.warning(
+                    "ExecutionStage: wait_for_order_terminal failed for %s: %s "
+                    "— treating as unknown status so finalize still runs",
+                    order_id, e,
+                )
+                status = None
             if status != "filled":
                 logger.warning(
                     "Sell order %s did not fill before buy phase (status=%s); buys will use current cash only",

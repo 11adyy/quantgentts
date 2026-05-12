@@ -132,8 +132,16 @@ class RiskRuleEngine:
             held_symbols = [p.symbol for p in positions]
             peers = highly_correlated_peers(decision.symbol, held_symbols, correlation_matrix)
             if peers:
-                peer_value = sum(p.market_value for p in positions if p.symbol in peers)
-                cluster_pct = (peer_value + new_investment) / total_value * 100
+                
+                
+                
+                
+                
+                peer_value = sum(
+                    p.market_value * _gross_multiplier(p.symbol)
+                    for p in positions if p.symbol in peers
+                )
+                cluster_pct = (peer_value + gross_new) / total_value * 100
                 if cluster_pct > max_correlated_cluster_pct:
                     violations.append(RiskViolation(
                         rule="correlation_cluster",

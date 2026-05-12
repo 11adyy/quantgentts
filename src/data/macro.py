@@ -33,6 +33,19 @@ def _et_lookback_start(days: int) -> pd.Timestamp:
 
 class MacroDataProvider:
     def __init__(self, api_key: str):
+        
+        
+        
+        
+        
+        
+        if not api_key or not api_key.strip():
+            raise ValueError(
+                "FRED_API_KEY is empty or unset. Set it in .env — macro "
+                "analysis cannot proceed without FRED access. Pass an "
+                "explicit non-empty string here only if you intend to "
+                "exercise the offline / mock path."
+            )
         self.fred = Fred(api_key=api_key)
 
     def _safe_get_series(self, series_id: str, **kwargs) -> pd.Series:
