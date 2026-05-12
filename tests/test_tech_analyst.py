@@ -208,3 +208,55 @@ def test_tech_analyst_auto_chunks_large_batch(mock_cls, sample_indicators, sampl
     assert mock_client.messages.create.call_count == 2
     
     assert merged.tokens_used == 1000 * 2 + 500 * 2
+    
+    
+    
+    
+    
+    assert merged.input_tokens == 1000 * 2
+    assert merged.output_tokens == 500 * 2
+    
+    
+    
+    assert merged.cost_usd is None
+
+
+@patch("anthropic.Anthropic")
+def test_tech_analyst_chunked_merged_cost_sums_when_model_priced(
+    mock_cls, sample_indicators, sample_bars,
+):
+    """Pin the happy path: when the configured model IS in cost_table.PRICING
+    (e.g. claude-opus-4-7), the merged AgentResult.cost_usd is the sum
+    of per-chunk costs — not None and not the cost of just the first chunk."""
+    syms = [f"SYM{i:02d}" for i in range(50)]
+    data = [
+        {"symbol": s,
+         "bars": sample_bars,
+         "indicators": TechnicalIndicators(**{**sample_indicators.model_dump(), "symbol": s})}
+        for s in syms
+    ]
+
+    call_counter = {"n": 0}
+    def _chunk_response(**kw):
+        call_counter["n"] += 1
+        chunk_syms = syms[:25] if call_counter["n"] == 1 else syms[25:]
+        arr = [json.loads(_valid_response_for(s))[0] for s in chunk_syms]
+        resp = MagicMock()
+        resp.content = [MagicMock(text=json.dumps(arr))]
+        resp.usage.input_tokens = 80_000   
+        resp.usage.output_tokens = 12_000
+        return resp
+
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = _chunk_response
+    mock_cls.return_value = mock_client
+
+    agent = TechAnalystAgent(api_key="test", model="claude-opus-4-7")
+    _, merged = agent.analyze_batch(data)
+
+    
+    
+    assert merged.cost_usd is not None
+    assert abs(merged.cost_usd - 4.20) < 0.01
+    assert merged.input_tokens == 80_000 * 2
+    assert merged.output_tokens == 12_000 * 2
