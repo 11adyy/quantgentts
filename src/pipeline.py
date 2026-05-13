@@ -841,8 +841,12 @@ class TradingPipeline:
                         return False, list(cancelled_specs)
                     return True, []
             try:
+                
+                
+                
+                
                 restored, failed_specs = self.broker._restore_stop_orders(
-                    symbol, cancelled_specs,
+                    symbol, cancelled_specs, check_idempotency=from_drain,
                 )
                 logger.info(
                     "SELL on %s terminated with no fill (status=%s) — "
@@ -1554,11 +1558,17 @@ class TradingPipeline:
             except Exception as e:
                 logger.error("auto_take_profit: submit failed for %s: %s", p.symbol, e)
                 if stop_specs:
-                    self.broker._restore_stop_orders(p.symbol, stop_specs)
+                    
+                    
+                    self.broker._restore_stop_orders(
+                        p.symbol, stop_specs, check_idempotency=False,
+                    )
                 continue
             if not self._order_accepted(order, p.symbol, "sell"):
                 if stop_specs:
-                    self.broker._restore_stop_orders(p.symbol, stop_specs)
+                    self.broker._restore_stop_orders(
+                        p.symbol, stop_specs, check_idempotency=False,
+                    )
                 continue
             
             
@@ -3720,7 +3730,7 @@ class TradingPipeline:
                     
                     
                     if stop_specs:
-                        self.broker._restore_stop_orders(p.symbol, stop_specs)
+                        self.broker._restore_stop_orders(p.symbol, stop_specs, check_idempotency=False)
                     continue
                 
                 
@@ -3955,7 +3965,7 @@ class TradingPipeline:
                 )
                 if not self._order_accepted(order, symbol, "sell"):
                     if stop_specs:
-                        self.broker._restore_stop_orders(symbol, stop_specs)
+                        self.broker._restore_stop_orders(symbol, stop_specs, check_idempotency=False)
                     continue
                 
                 
@@ -4099,7 +4109,7 @@ class TradingPipeline:
                     
                     
                     if stop_specs:
-                        self.broker._restore_stop_orders(p.symbol, stop_specs)
+                        self.broker._restore_stop_orders(p.symbol, stop_specs, check_idempotency=False)
                     continue
                 
                 
@@ -4978,7 +4988,7 @@ class TradingPipeline:
                     
                     
                     if stop_specs:
-                        self.broker._restore_stop_orders(p.symbol, stop_specs)
+                        self.broker._restore_stop_orders(p.symbol, stop_specs, check_idempotency=False)
                     continue
                 
                 

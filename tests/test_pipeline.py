@@ -764,8 +764,10 @@ def test_take_profit_restores_stops_when_sell_rejected(tmp_path):
     
     
     
+    
+    
     pipeline.broker._restore_stop_orders.assert_called_once_with(
-        "NVDA", cancelled,
+        "NVDA", cancelled, check_idempotency=False,
     )
     
     pipeline.broker._submit_stop_limit_order.assert_not_called()
@@ -916,8 +918,9 @@ def test_take_profit_restores_originals_when_limit_does_not_fill(tmp_path):
     pipeline._auto_take_profit([winner], run_id="r2")
 
     
+    
     pipeline.broker._restore_stop_orders.assert_called_once_with(
-        "NVDA", cancelled,
+        "NVDA", cancelled, check_idempotency=False,
     )
     
     pipeline.broker._submit_stop_limit_order.assert_not_called()
@@ -963,8 +966,9 @@ def test_finalize_protection_cancels_lingering_sell_when_status_non_terminal():
     )
     pipeline.broker.wait_for_order_terminal.assert_called_once()
     
+    
     pipeline.broker._restore_stop_orders.assert_called_once_with(
-        "NVDA", cancelled,
+        "NVDA", cancelled, check_idempotency=False,
     )
     pipeline._reprotect_residual_after_partial_sell.assert_not_called()
 
@@ -1208,7 +1212,11 @@ def test_intra_check_drains_orphan_restores_at_entry(tmp_path):
 
     
     assert db.get_pending_protection_restores() == []
-    pipeline.broker._restore_stop_orders.assert_called_once_with("NVDA", cancelled)
+    
+    
+    pipeline.broker._restore_stop_orders.assert_called_once_with(
+        "NVDA", cancelled, check_idempotency=True,
+    )
     db.close()
 
 

@@ -537,3 +537,75 @@ def test_drop_invalid_stock_news_handles_non_dict_shape():
     parsed["stock_news"] = "oops not a dict"
     out = NewsAnalystAgent._drop_invalid_stock_news(parsed)
     assert out["stock_news"] == {}
+
+
+
+
+
+
+
+
+
+
+from datetime import datetime, timezone
+from unittest.mock import patch as _patch
+from src.data.news import NewsDataProvider
+
+
+@_patch("src.data.news.et_now")
+def test_fetch_news_monday_extends_lookback_to_72h(mock_et_now, caplog):
+    """Monday morning auto-extends the news lookback from 24h to 72h so
+    weekend Fed pressers / geopolitical events / earnings pre-anns are
+    visible to news_analyst. Pre-fix: Sat/Sun headlines invisible because
+    fetch_news cutoff = now() - 24h, and the system had no weekend job."""
+    
+    
+    mock_et_now.return_value = datetime(2026, 5, 11, 9, 30, tzinfo=timezone.utc)
+
+    provider = NewsDataProvider(feeds={}, lookback_hours=24)
+    import logging
+    with caplog.at_level(logging.INFO):
+        provider.fetch_news()
+
+    assert any(
+        "Monday detected" in r.message and "72h" in r.message
+        for r in caplog.records
+    ), "Monday morning fetches must extend lookback and log it"
+
+
+@_patch("src.data.news.et_now")
+def test_fetch_news_tuesday_keeps_default_lookback(mock_et_now, caplog):
+    """Non-Monday runs use the default 24h lookback. No log noise."""
+    mock_et_now.return_value = datetime(2026, 5, 12, 9, 30, tzinfo=timezone.utc)
+
+    provider = NewsDataProvider(feeds={}, lookback_hours=24)
+    import logging
+    with caplog.at_level(logging.INFO):
+        provider.fetch_news()
+
+    assert not any(
+        "Monday detected" in r.message for r in caplog.records
+    ), "Tuesday must not trigger the Monday extension"
+
+
+@_patch("src.data.news.et_now")
+def test_fetch_news_override_takes_precedence_over_monday_extension(mock_et_now):
+    """An explicit lookback_hours_override (replay scenario, hand-tuning)
+    bypasses the Monday heuristic. Pin this so a future caller can
+    override predictably."""
+    mock_et_now.return_value = datetime(2026, 5, 11, 9, 30, tzinfo=timezone.utc)
+
+    provider = NewsDataProvider(feeds={}, lookback_hours=24)
+    
+    
+    
+    with _patch("src.data.news.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 5, 11, 9, 30, tzinfo=timezone.utc)
+        mock_dt.min = datetime.min
+        
+        provider.fetch_news(lookback_hours_override=6)
+        
+        
+        
+        
+        

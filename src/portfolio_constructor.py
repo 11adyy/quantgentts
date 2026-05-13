@@ -302,6 +302,30 @@ class PortfolioConstructor:
             atr_stop = entry_price - self.cfg.default_stop_atr_multiple * analysis.atr_14
             if atr_stop > 0:
                 return round(atr_stop, 2)
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            import logging
+            logging.getLogger(__name__).warning(
+                "ATR-based stop for entry=$%.2f with ATR=$%.4f would be "
+                "non-positive (%.4f) — the symbol is too volatile for the "
+                "%.1f×ATR default and no LLM-supplied stop is available. "
+                "Rejecting BUY rather than falling through to naive %.0f%% "
+                "stop that would be triggered on normal noise.",
+                entry_price, analysis.atr_14, atr_stop,
+                self.cfg.default_stop_atr_multiple,
+                self.cfg.fallback_stop_pct * 100,
+            )
+            return None
+        
+        
         
         
         return round(entry_price * (1 - self.cfg.fallback_stop_pct), 2)
