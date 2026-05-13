@@ -58,8 +58,26 @@ class RiskRuleEngine:
               pending_cash_outflow: float = 0.0) -> list[RiskViolation]:
         if decision.action == "SELL":
             return []
-        if total_value <= 0:
-            return []
+        
+        
+        
+        
+        
+        
+        
+        
+        import math
+        if not math.isfinite(total_value) or total_value <= 0:
+            return [RiskViolation(
+                rule="max_total_position_pct",   
+                message=(
+                    f"total_value={total_value} is not a valid equity figure "
+                    f"(broker glitch or fresh account) — refusing to risk-check "
+                    f"BUY for {decision.symbol}; blocking until next snapshot"
+                ),
+                value=0.0,
+                limit=0.0,
+            )]
 
         
         
