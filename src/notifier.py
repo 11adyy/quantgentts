@@ -200,6 +200,29 @@ def format_session_result(
 
 def _append_trade_session_body(lines: list[str], result: dict) -> None:
     orders = result.get("orders") or []
+
+    
+    
+    
+    
+    
+    
+    
+    
+    forced = [
+        o for o in orders
+        if isinstance(o, dict) and str(o.get("action", "")).upper() in (
+            "FORCE_DELEVER", "EMERGENCY_SELL"
+        )
+    ]
+    if forced:
+        actions = sorted({str(o.get("action", "")).upper() for o in forced})
+        symbols = sorted({str(o.get("symbol", "?")) for o in forced})
+        lines.append(
+            f"🚨 AUTONOMOUS INTERVENTION ({', '.join(actions)}): "
+            f"{len(forced)} order(s) on {', '.join(symbols)}"
+        )
+
     if orders:
         buys = [o for o in orders if _order_side(o) == "buy"]
         sells = [o for o in orders if _order_side(o) == "sell"]
@@ -210,7 +233,15 @@ def _append_trade_session_body(lines: list[str], result: dict) -> None:
         
         
         for o in sells[:10]:
-            lines.append(f"  SELL  {_order_summary(o)}")
+            
+            
+            action = str(o.get("action", "")).upper() if isinstance(o, dict) else ""
+            label = "  SELL  "
+            if action == "FORCE_DELEVER":
+                label = "  🚨FORCE"
+            elif action == "EMERGENCY_SELL":
+                label = "  🚨EMER "
+            lines.append(f"{label}{_order_summary(o)}")
         for o in buys[:10]:
             lines.append(f"  BUY   {_order_summary(o)}")
         omitted = max(0, len(buys) - 10) + max(0, len(sells) - 10)

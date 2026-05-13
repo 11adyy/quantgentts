@@ -38,6 +38,21 @@ class Database:
             self.conn.execute("PRAGMA synchronous=NORMAL")
         except sqlite3.DatabaseError:
             pass
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        try:
+            self.conn.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.DatabaseError:
+            pass
         self._create_tables()
 
     def _create_tables(self):
