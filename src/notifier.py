@@ -331,6 +331,34 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
                     continue
                 lines.append(f"   • {act[:200]}")
 
+    
+    
+    
+    
+    
+    
+    auto_meta = result.get("auto_meta")
+    if isinstance(auto_meta, dict):
+        applied = auto_meta.get("applied", 0)
+        rejected = auto_meta.get("rejected", 0)
+        period = auto_meta.get("period", "?")
+        status = auto_meta.get("status", "?")
+        if status == "auto_meta_error":
+            err = auto_meta.get("error", "?")[:200]
+            lines.append(f"🧪 meta {period}: ERROR — {err}")
+        elif applied == 0 and rejected > 0:
+            
+            lines.append(
+                f"🧪 meta {period}: {rejected} proposal(s) staged "
+                f"(dry-run — see data/evolution/{period}/proposed_edits.json)"
+            )
+        elif applied > 0:
+            lines.append(
+                f"🧪 meta {period}: applied {applied} learning(s); "
+                f"rejected {rejected}"
+            )
+        
+
 
 def _session_cost_line(run_id: str | None) -> str | None:
     """Return '💵 cost: $X.XX (N calls)' for a session's run_id, or
