@@ -1259,6 +1259,102 @@ class TradingPipeline:
             
             
 
+    def _reconcile_orphan_pending_submits(self) -> int:
+        """Resolve BUY write-ahead orphans (audit F4).
+
+        A crash between broker.submit_order() returning and
+        confirm_trade_submitted() landing leaves a 'pending_submit' row
+        with broker_order_id=NULL while the broker may actually hold (and
+        fill) the order. Nothing swept these, so the fill went untracked
+        forever — position/cash drift. For each orphan:
+
+          - exactly ONE broker order matching symbol+side+qty → adopt its
+            id (confirm_trade_submitted); _reconcile_fills then resolves
+            the fill normally.
+          - ZERO matching broker orders → the submit never landed; mark
+            submit_failed.
+          - AMBIGUOUS (>1 candidate) → do NOT guess. Adopting the wrong
+            order would mis-track real money — leave the row pending and
+            ERROR-log for manual reconciliation.
+
+        Best-effort and self-contained: any per-row failure is logged and
+        skipped, never breaks the session. Called once per session at
+        entry, beside _drain_pending_protection_restores.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        try:
+            rows = self.db.get_orphaned_pending_submits()
+        except Exception as exc:
+            logger.warning("orphan-sweep: DB read failed: %s", exc)
+            return 0
+        if not rows:
+            return 0
+
+        resolved = 0
+        
+        
+        after = datetime.now(timezone.utc) - timedelta(hours=24)
+        for row in rows:
+            row_id = row["id"]
+            symbol = row["symbol"]
+            try:
+                want_qty = float(row.get("qty") or 0)
+            except (TypeError, ValueError):
+                want_qty = 0.0
+            try:
+                candidates = self.broker.list_recent_orders(symbol, "buy", after)
+            except Exception as exc:
+                logger.warning(
+                    "orphan-sweep: broker query failed for %s row %d: %s — "
+                    "leaving for next session", symbol, row_id, exc,
+                )
+                continue
+            matches = [
+                c for c in candidates
+                if c.get("id")
+                and abs(float(c.get("qty") or 0) - want_qty) < 1e-6
+            ]
+            if len(matches) == 1:
+                bid = matches[0]["id"]
+                try:
+                    self.db.confirm_trade_submitted(row_id, broker_order_id=bid)
+                    resolved += 1
+                    logger.warning(
+                        "orphan-sweep: adopted broker order %s for %s row %d "
+                        "(BUY write-ahead survived a crash) — _reconcile_fills "
+                        "will resolve its fill", bid, symbol, row_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "orphan-sweep: adopt failed for %s row %d: %s",
+                        symbol, row_id, exc,
+                    )
+            elif not matches:
+                try:
+                    self.db.mark_trade_submit_failed(row_id)
+                    resolved += 1
+                    logger.warning(
+                        "orphan-sweep: no broker order matches %s row %d "
+                        "(qty=%.4f) — submit never landed; marked "
+                        "submit_failed", symbol, row_id, want_qty,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "orphan-sweep: mark_submit_failed for %s row %d: %s",
+                        symbol, row_id, exc,
+                    )
+            else:
+                logger.error(
+                    "orphan-sweep: %d ambiguous broker orders for %s row %d "
+                    "(qty=%.4f) — NOT guessing (mis-adoption mis-tracks "
+                    "money); leaving pending_submit for manual review",
+                    len(matches), symbol, row_id, want_qty,
+                )
+        if resolved:
+            logger.info("orphan-sweep: resolved %d pending_submit row(s)", resolved)
+        return resolved
+
     def _build_position_history(self, positions) -> dict[str, dict]:
         """L2 memory: for each held symbol, entry context + Tech rating trajectory.
 
@@ -4223,6 +4319,9 @@ class TradingPipeline:
             
             
             self._drain_pending_protection_restores()
+            
+            
+            self._reconcile_orphan_pending_submits()
 
             
             self.broker.cancel_open_entry_orders()
@@ -4558,6 +4657,7 @@ class TradingPipeline:
         
         
         self._drain_pending_protection_restores()
+        self._reconcile_orphan_pending_submits()  
 
         
         account = self.broker.get_account()
@@ -4803,6 +4903,7 @@ class TradingPipeline:
         
         
         self._drain_pending_protection_restores()
+        self._reconcile_orphan_pending_submits()  
 
         try:
             reports = self.earnings_provider.check_and_fetch(
@@ -4933,6 +5034,7 @@ class TradingPipeline:
         
         
         self._drain_pending_protection_restores()
+        self._reconcile_orphan_pending_submits()  
 
         try:
             account = self.broker.get_account()
@@ -5078,6 +5180,7 @@ class TradingPipeline:
         
         
         self._drain_pending_protection_restores()
+        self._reconcile_orphan_pending_submits()  
 
         
         

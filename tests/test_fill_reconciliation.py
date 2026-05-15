@@ -329,3 +329,146 @@ def test_compute_trade_calibration_counts_reduce_and_take_profit(tmp_path):
     
     assert stats["n"] == 3
     assert stats["win_rate_pct"] == 100.0
+
+
+
+
+
+
+
+
+def _insert_orphan(db: Database, *, symbol="NVDA", qty=10, age_seconds=3600) -> int:
+    """A pending_submit / NULL-broker_order_id row, backdated past the
+    age gate so the sweep treats it as a prior-session orphan."""
+    row_id = db.insert_trade(
+        symbol=symbol, action="BUY", qty=qty, price=100.0,
+        reasoning="write-ahead intent", run_id="r-old",
+        broker_order_id=None, fill_status="pending_submit",
+    )
+    db.execute(
+        "UPDATE trades SET timestamp = datetime('now', ?) WHERE id = ?",
+        (f"-{age_seconds} seconds", row_id),
+    )
+    db.conn.commit()
+    return row_id
+
+
+def _row(db: Database, row_id: int) -> dict:
+    return dict(db.execute(
+        "SELECT fill_status, broker_order_id FROM trades WHERE id = ?",
+        (row_id,),
+    ).fetchone())
+
+
+def test_get_orphaned_pending_submits_age_gate(tmp_path):
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+
+    
+    fresh = db.insert_trade(
+        symbol="AAPL", action="BUY", qty=5, price=10.0, reasoning="x",
+        run_id="r1", broker_order_id=None, fill_status="pending_submit",
+    )
+    
+    
+    db.insert_trade(
+        symbol="MSFT", action="BUY", qty=5, price=10.0, reasoning="x",
+        run_id="r1", broker_order_id="ord-1", fill_status="submitted",
+    )
+    db.insert_trade(
+        symbol="JPM", action="BUY", qty=5, price=10.0, reasoning="x",
+        run_id="r1", broker_order_id="ord-2", fill_status="pending_submit",
+    )
+    assert db.get_orphaned_pending_submits() == []
+
+    backdated = _insert_orphan(db, symbol="NVDA", qty=10)
+    orphans = db.get_orphaned_pending_submits()
+    assert [o["id"] for o in orphans] == [backdated]
+
+    
+    
+    
+    
+    
+    db.execute(
+        "UPDATE trades SET timestamp = datetime('now', '-5 seconds') WHERE id = ?",
+        (fresh,),
+    )
+    db.conn.commit()
+    ids = {o["id"] for o in db.get_orphaned_pending_submits(min_age_seconds=0)}
+    assert ids == {fresh, backdated}
+
+
+def test_orphan_sweep_adopts_single_broker_match(tmp_path):
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    row_id = _insert_orphan(db, symbol="NVDA", qty=10)
+
+    broker = MagicMock()
+    broker.list_recent_orders.return_value = [
+        {"id": "alp-99", "symbol": "NVDA", "side": "buy", "qty": 10.0,
+         "status": "filled"},
+    ]
+    pipeline = _mk_pipeline(db, broker)
+
+    assert pipeline._reconcile_orphan_pending_submits() == 1
+    r = _row(db, row_id)
+    assert r["fill_status"] == "submitted"
+    assert r["broker_order_id"] == "alp-99"
+
+
+def test_orphan_sweep_marks_failed_when_no_broker_order(tmp_path):
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    row_id = _insert_orphan(db, symbol="NVDA", qty=10)
+
+    broker = MagicMock()
+    broker.list_recent_orders.return_value = []  
+    pipeline = _mk_pipeline(db, broker)
+
+    assert pipeline._reconcile_orphan_pending_submits() == 1
+    r = _row(db, row_id)
+    assert r["fill_status"] == "submit_failed"
+    assert r["broker_order_id"] is None
+
+
+def test_orphan_sweep_leaves_ambiguous_for_manual(tmp_path):
+    """Two broker orders match symbol+side+qty — adopting either could
+    mis-track money. The row must stay untouched + flagged, never guessed."""
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    row_id = _insert_orphan(db, symbol="NVDA", qty=10)
+
+    broker = MagicMock()
+    broker.list_recent_orders.return_value = [
+        {"id": "alp-A", "symbol": "NVDA", "side": "buy", "qty": 10.0,
+         "status": "filled"},
+        {"id": "alp-B", "symbol": "NVDA", "side": "buy", "qty": 10.0,
+         "status": "filled"},
+    ]
+    pipeline = _mk_pipeline(db, broker)
+
+    assert pipeline._reconcile_orphan_pending_submits() == 0
+    r = _row(db, row_id)
+    assert r["fill_status"] == "pending_submit"  
+    assert r["broker_order_id"] is None
+
+
+def test_orphan_sweep_qty_mismatch_is_not_a_match(tmp_path):
+    """A broker order for a different qty is NOT this row's order —
+    treat as 'no match' (submit never landed), not a wrong adoption."""
+    db = Database(str(tmp_path / "t.db"))
+    db.initialize()
+    row_id = _insert_orphan(db, symbol="NVDA", qty=10)
+
+    broker = MagicMock()
+    broker.list_recent_orders.return_value = [
+        {"id": "alp-X", "symbol": "NVDA", "side": "buy", "qty": 7.0,
+         "status": "filled"},
+    ]
+    pipeline = _mk_pipeline(db, broker)
+
+    assert pipeline._reconcile_orphan_pending_submits() == 1
+    r = _row(db, row_id)
+    assert r["fill_status"] == "submit_failed"
+    assert r["broker_order_id"] is None
