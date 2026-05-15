@@ -110,31 +110,49 @@ def _get_sector(symbol: str) -> str:
     yfinance on every call for an unresolved symbol is a small overhead vs.
     silently disabling a hard risk rule.
     """
+    
+    
+    
+    
+    
     with _sector_lock:
-        if symbol in _sector_cache:
-            return _sector_cache[symbol]
-        if symbol.upper() in _INDEX_ETFS:
+        cached = _sector_cache.get(symbol)
+    if cached is not None:
+        return cached
+    if symbol.upper() in _INDEX_ETFS:
+        with _sector_lock:
             _sector_cache[symbol] = "Broad"
-            return "Broad"
+        return "Broad"
 
-        def _fetch():
-            try:
-                return yf.Ticker(symbol).info or {}
-            except Exception:
-                return {}
-
+    def _fetch():
         try:
-            with ThreadPoolExecutor(max_workers=1) as ex:
-                info = ex.submit(_fetch).result(timeout=_SECTOR_LOOKUP_TIMEOUT_S)
-        except FuturesTimeout:
-            logger.warning("yfinance sector lookup timed out for %s", symbol)
-            info = {}
+            return yf.Ticker(symbol).info or {}
+        except Exception:
+            return {}
 
-        raw = info.get("sector", "") if isinstance(info, dict) else ""
-        canonical = _canonicalize_sector(raw)
-        if canonical != "Unknown":
+    
+    
+    
+    
+    
+    
+    
+    
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        info = ex.submit(_fetch).result(timeout=_SECTOR_LOOKUP_TIMEOUT_S)
+    except FuturesTimeout:
+        logger.warning("yfinance sector lookup timed out for %s", symbol)
+        info = {}
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+    raw = info.get("sector", "") if isinstance(info, dict) else ""
+    canonical = _canonicalize_sector(raw)
+    if canonical != "Unknown":
+        with _sector_lock:
             _sector_cache[symbol] = canonical
-        return canonical
+    return canonical
 
 
 class AlpacaBroker:
