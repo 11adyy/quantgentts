@@ -13,6 +13,21 @@ from src.scheduler import TradingScheduler
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
+
+
+
+
+
+
+
+
+
+
+
+_RETRYABLE_RESULT_STATUSES = frozenset(
+    {"broker_error", "fetch_error", "analysis_error"}
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -147,6 +162,20 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 logger.warning("notifier crashed in finally: %s", exc)
     logger.info("Result: %s", result)
+
+    
+    
+    
+    
+    
+    status = result.get("status") if isinstance(result, dict) else None
+    if status in _RETRYABLE_RESULT_STATUSES:
+        logger.warning(
+            "Session %s ended with retryable status %r — exiting non-zero "
+            "so the OS-timer wrapper retries this slot on the next tick.",
+            args.mode, status,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
