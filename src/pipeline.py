@@ -1461,6 +1461,8 @@ class TradingPipeline:
                 )
             except Exception as e:
                 logger.warning("ex-div: audit log failed for %s: %s", p.symbol, e)
+            if isinstance(order, dict):
+                order.setdefault("action", "TRAIL_STOP")  
             orders.append(order)
             logger.info(
                 "Ex-div adjust: %s ex-div %s div $%.4f → stop $%.2f → $%.2f",
@@ -1595,6 +1597,8 @@ class TradingPipeline:
                 )
             except Exception as e:
                 logger.warning("auto_take_profit: audit log failed for %s: %s", p.symbol, e)
+            if isinstance(order, dict):
+                order.setdefault("action", "TAKE_PROFIT")  
             orders.append(order)
             logger.info(
                 "Auto take-profit: %s +%.1f%% → sold %s of %s @ limit $%.2f",
@@ -3740,6 +3744,12 @@ class TradingPipeline:
                     "position_qty_before_sell": p.qty,
                     "specs": stop_specs,
                 })
+                
+                
+                
+                
+                if isinstance(order, dict):
+                    order.setdefault("action", "EMERGENCY_SELL")
                 orders.append(order)
                 self.db.insert_trade(
                     symbol=p.symbol, action="EMERGENCY_SELL", qty=qty,
@@ -3927,6 +3937,8 @@ class TradingPipeline:
                         continue
                     order = self.broker.replace_stop_loss(symbol, new_stop)
                     if order:
+                        if isinstance(order, dict):
+                            order.setdefault("action", "TRAIL_STOP")  
                         orders.append(order)
                         self.db.insert_trade(
                             symbol=symbol, action="TRAIL_STOP",
@@ -3975,6 +3987,10 @@ class TradingPipeline:
                     "position_qty_before_sell": position_qty,
                     "specs": stop_specs,
                 })
+                
+                
+                if isinstance(order, dict):
+                    order.setdefault("action", act)
                 orders.append(order)
                 self.db.insert_trade(
                     symbol=symbol, action=act, qty=qty,
@@ -4131,6 +4147,10 @@ class TradingPipeline:
                     broker_order_id=order.get("id"),
                     fill_status="submitted",
                 )
+                
+                
+                if isinstance(order, dict):
+                    order.setdefault("action", "FORCE_DELEVER")
                 orders.append(order)
                 
                 projected_proceeds += p.market_value * 0.99
@@ -5000,6 +5020,10 @@ class TradingPipeline:
                     "position_qty_before_sell": p.qty,
                     "specs": stop_specs,
                 })
+                
+                
+                if isinstance(order, dict):
+                    order.setdefault("action", "EMERGENCY_SELL")
                 orders.append(order)
                 self.db.insert_trade(
                     symbol=p.symbol, action="EMERGENCY_SELL", qty=qty,
