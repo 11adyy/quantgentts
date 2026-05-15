@@ -765,6 +765,12 @@ class ExecutionStage:
                         action_label, decision.symbol,
                     )
                     continue
+                
+                
+                
+                wal_row_id = pipeline._write_ahead_protection_restore(
+                    decision.symbol, position_qty, stop_specs,
+                )
                 order = pipeline.broker.submit_order(
                     symbol=decision.symbol, qty=qty, side="sell",
                     limit_price=sell_limit,
@@ -783,6 +789,7 @@ class ExecutionStage:
                     "order_id": order["id"], "symbol": decision.symbol,
                     "position_qty_before_sell": position_qty,
                     "specs": stop_specs,
+                    "wal_row_id": wal_row_id,
                 })
                 
                 
@@ -804,6 +811,7 @@ class ExecutionStage:
                 logger.error("Order failed for %s %s: %s", decision.action, decision.symbol, e)
 
         for order_id in sell_order_ids:
+            
             
             
             
@@ -834,6 +842,7 @@ class ExecutionStage:
             pipeline._finalize_protection_after_sell(
                 prot["order_id"], prot["symbol"],
                 prot["position_qty_before_sell"], prot["specs"],
+                wal_row_id=prot.get("wal_row_id"),
             )
 
         if sell_decisions:
