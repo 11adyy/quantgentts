@@ -757,7 +757,13 @@ class ExecutionStage:
                 sell_price = existing[0].current_price
                 sell_limit = round(sell_price * 0.995, 2)
                 position_qty = existing[0].qty
-                ok, stop_specs = pipeline.broker.cancel_protective_stops(decision.symbol)
+                
+                
+                
+                
+                ok, stop_specs, wal_row_id = pipeline._cancel_stops_with_write_ahead(
+                    decision.symbol, position_qty,
+                )
                 if not ok:
                     logger.warning(
                         "Skipping %s %s: protective-stop clear failed; "
@@ -765,12 +771,6 @@ class ExecutionStage:
                         action_label, decision.symbol,
                     )
                     continue
-                
-                
-                
-                wal_row_id = pipeline._write_ahead_protection_restore(
-                    decision.symbol, position_qty, stop_specs,
-                )
                 order = pipeline.broker.submit_order(
                     symbol=decision.symbol, qty=qty, side="sell",
                     limit_price=sell_limit,

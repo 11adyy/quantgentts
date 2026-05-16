@@ -299,6 +299,9 @@ def test_run_intra_check_emergency_sells_on_breach(tmp_path):
     pipeline.broker.submit_order.return_value = {
         "id": "sell-1", "status": "accepted", "symbol": "NVDA",
     }
+    
+    pipeline.broker.snapshot_protective_stops.return_value = (True, [])
+    pipeline.broker.cancel_snapshotted_stops.return_value = True
     pipeline.broker.cancel_protective_stops.return_value = (True, [])
 
     result = pipeline.run_intra_check()
@@ -366,6 +369,9 @@ def test_auto_take_profit_triggers_once_at_30pct(tmp_path):
     pipeline.broker.submit_order.return_value = {
         "id": "tp-1", "status": "accepted", "symbol": "NVDA",
     }
+    
+    pipeline.broker.snapshot_protective_stops.return_value = (True, [])
+    pipeline.broker.cancel_snapshotted_stops.return_value = True
     pipeline.broker.cancel_protective_stops.return_value = (True, [])
 
     
@@ -418,6 +424,9 @@ def test_auto_take_profit_retries_after_canceled_zero_fill(tmp_path):
     pipeline.broker.submit_order.return_value = {
         "id": "tp-1", "status": "accepted", "symbol": "NVDA",
     }
+    
+    pipeline.broker.snapshot_protective_stops.return_value = (True, [])
+    pipeline.broker.cancel_snapshotted_stops.return_value = True
     pipeline.broker.cancel_protective_stops.return_value = (True, [])
 
     winner = Position(
