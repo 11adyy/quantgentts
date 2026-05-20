@@ -7,11 +7,11 @@ the output reflects what Alpaca actually accepted, filled, or rejected.
 
 Outputs (auto-emitted as a set, alongside --output):
 
-    data/alpaca_trades.txt              # human-readable report
-    data/alpaca_trades.orders.jsonl     # every order, FULL pydantic dump
-    data/alpaca_trades.activities.jsonl # account activity log (FILLs +
+    data/alpaca/trades.txt              # human-readable report
+    data/alpaca/trades.orders.jsonl     # every order, FULL pydantic dump
+    data/alpaca/trades.activities.jsonl # account activity log (FILLs +
                                         # by default DIV/JNLC/...; raw)
-    data/alpaca_trades.account.json     # full account snapshot
+    data/alpaca/trades.account.json     # full account snapshot
 
 The JSONL/JSON companions are the canonical machine-readable copies and
 preserve every field the SDK exposes — nothing is dropped. The .txt is
@@ -71,6 +71,12 @@ def _load_env_file() -> None:
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
+            
+            
+            
+            
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
             k, v = line.split("=", 1)
             k = k.strip()
             v = v.strip().strip('"').strip("'")
@@ -114,14 +120,25 @@ def _normalize_for_json(v):
     from enum import Enum
     from uuid import UUID
 
-    if v is None or isinstance(v, (str, int, float, bool, datetime)):
-        return v
+    if v is None:
+        return None
+    
+    
+    
+    
+    
+    
+    
     if isinstance(v, Enum):
         return v.value
     if isinstance(v, UUID):
         return str(v)
     if isinstance(v, Decimal):
         return str(v)
+    if isinstance(v, datetime):
+        return v
+    if isinstance(v, (str, int, float, bool)):
+        return v
     if isinstance(v, dict):
         return {k: _normalize_for_json(x) for k, x in v.items()}
     if isinstance(v, (list, tuple, set)):
@@ -573,8 +590,8 @@ def _parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Export Alpaca order history.")
     p.add_argument(
         "--output", type=Path,
-        default=PROJECT_ROOT / "data" / "alpaca_trades.txt",
-        help="Text report path (default: data/alpaca_trades.txt). "
+        default=PROJECT_ROOT / "data" / "alpaca" / "trades.txt",
+        help="Text report path (default: data/alpaca/trades.txt). "
               "Companion JSONL/JSON files derive their paths from this stem.",
     )
     p.add_argument(

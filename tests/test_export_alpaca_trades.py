@@ -224,9 +224,14 @@ def test_order_dump_preserves_every_sdk_field():
     missing = [name for name in Order.model_fields if name not in d]
     assert not missing, f"export dropped fields the SDK exposed: {missing}"
     
-    assert d["side"] == "buy"
-    assert d["status"] == "filled"
-    assert d["asset_class"] == "us_equity"
+    
+    
+    
+    
+    assert d["side"] == "buy" and type(d["side"]) is str
+    assert d["status"] == "filled" and type(d["status"]) is str
+    assert d["asset_class"] == "us_equity" and type(d["asset_class"]) is str
+    assert d["order_class"] == "simple" and type(d["order_class"]) is str
     assert isinstance(d["id"], str) and len(d["id"]) == 36  
     
     assert d["filled_avg_price"] == "187.42"
