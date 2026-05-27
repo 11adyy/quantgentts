@@ -1019,10 +1019,17 @@ class ExecutionStage:
                     
                     
                     
-                    pipeline.db.mark_trade_submit_failed(pending_row_id)
+                    
+                    
+                    
+                    
+                    
+                    
                     raise
 
                 if not pipeline._order_accepted(order, decision.symbol, "buy"):
+                    
+                    
                     
                     
                     

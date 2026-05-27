@@ -1404,6 +1404,39 @@ class TradingPipeline:
         )
         if best_stop <= 0:
             return True
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        try:
+            existing = self.broker._list_open_sell_stop_orders(symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Reprotect idempotency check failed for %s: %s — "
+                "proceeding with submit (may duplicate if a stop already "
+                "exists)", symbol, exc,
+            )
+            existing = []
+        for o in existing or []:
+            try:
+                existing_sp = float(getattr(o, "stop_price", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            
+            if existing_sp > 0 and abs(existing_sp - best_stop) < 0.005:
+                logger.info(
+                    "Reprotect skipped for %s — a stop at $%.2f already "
+                    "exists at the broker (idempotent re-run)",
+                    symbol, best_stop,
+                )
+                return True
+
         try:
             self.broker._submit_stop_limit_order(
                 symbol=symbol, qty=residual_qty, stop_price=best_stop,

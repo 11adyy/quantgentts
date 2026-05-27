@@ -896,7 +896,14 @@ class AlpacaBroker:
                      side, qty, symbol, limit_price or "market", bracket_info, order.status)
         return {
             "id": str(order.id),
-            "status": str(order.status),
+            
+            
+            
+            
+            
+            
+            
+            "status": str(getattr(order.status, "value", order.status)),
             "symbol": order.symbol,
             
             
@@ -913,7 +920,9 @@ class AlpacaBroker:
     def close_position(self, symbol: str) -> dict:
         order = self.client.close_position(symbol)
         logger.info("Closed position: %s", symbol)
-        return {"id": str(order.id), "status": str(order.status)}
+        
+        return {"id": str(order.id),
+                "status": str(getattr(order.status, "value", order.status))}
 
     def _list_open_sell_stop_orders(self, symbol: str) -> list:
         try:
@@ -983,7 +992,10 @@ class AlpacaBroker:
             limit_price=limit_price_q,
         )
         order = self.client.submit_order(req)
-        return {"id": str(order.id), "status": str(order.status), "symbol": symbol}
+        
+        return {"id": str(order.id),
+                "status": str(getattr(order.status, "value", order.status)),
+                "symbol": symbol}
 
     def _restore_stop_orders(
         self, symbol: str, stop_specs: list[dict],
