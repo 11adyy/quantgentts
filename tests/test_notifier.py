@@ -334,6 +334,7 @@ def test_format_evening_shows_daily_pnl_when_present():
     
     
     
+    
     assert "+1.15%" in msg or "+1.16%" in msg
     assert "$107,278.55" in msg
 
@@ -533,6 +534,75 @@ def test_format_flags_cost_unknown_when_any_row_has_null_cost(tmp_path, monkeypa
     assert msg is not None
     assert "$?.??" in msg
     assert "see cost_table.py" in msg
+
+
+def test_format_evening_position_snapshot_tolerates_null_unrealized_pnl(
+    tmp_path, monkeypatch,
+):
+    """Defensive: a NULL `unrealized_pnl` row (schema migration / future
+    direct manipulation) must not crash the winners/losers list comps
+    with `None > 0` — the outer try/except can't catch a TypeError
+    inside a list comprehension at the right granularity, so the entire
+    evening snapshot would silently disappear. The current schema sets
+    NOT NULL so this can't fire in production today, but the filter
+    costs nothing and locks the contract. Audit 2026-05-27."""
+    import sqlite3
+    db_path = tmp_path / "positions.db"
+    conn = sqlite3.connect(str(db_path))
+    
+    conn.execute(
+        "CREATE TABLE positions ("
+        "symbol TEXT PRIMARY KEY, qty REAL, avg_entry REAL,"
+        " current_price REAL, market_value REAL,"
+        " unrealized_pnl REAL, sector TEXT)"
+    )
+    
+    conn.execute(
+        "INSERT INTO positions VALUES ('AAPL', 10, 100, 105, 1050, 50, 'Tech')"
+    )
+    conn.execute(
+        "INSERT INTO positions VALUES ('NVDA', 5, 200, 200, 1000, NULL, 'Tech')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr("src.notifier._DB_PATH", db_path)
+    result = {
+        "status": "analyzed", "run_id": "run-e",
+        "daily_pnl": 0.0, "total_value": 2050.0,
+        "analysis": {"risk_rating": "moderate"},
+    }
+    
+    msg = format_session_result("evening", result, 30.0)
+    assert msg is not None
+    
+    
+    assert "AAPL" in msg
+
+
+def test_format_evening_daily_return_uses_prior_equity_denominator():
+    """Daily return is P&L over PRIOR-day equity, not over current.
+    Using current understates losses (denominator includes today's
+    draw). Picked values where the two denominators differ at the
+    formatter's 2-decimal resolution so the bug surfaces clearly.
+
+    Old (current-equity denom):
+       -5000 / 95000 * 100 = -5.26%
+    New (prior-equity denom, prior = 100000):
+       -5000 / 100000 * 100 = -5.00%  ← the canonical figure
+    """
+    result = {
+        "status": "analyzed", "run_id": "run-down",
+        "daily_pnl": -5000.0, "total_value": 95000.0,
+        "analysis": {"risk_rating": "elevated"},
+    }
+    msg = format_session_result("evening", result, 30.0)
+    assert msg is not None
+    assert "-5.00%" in msg, (
+        f"daily return should be -5.00% (loss / prior-equity); "
+        f"-5.26% would mean the old current-equity denom regressed back in"
+    )
+    assert "-5.26%" not in msg
 
 
 def test_format_evening_position_snapshot_skips_gracefully_without_db(tmp_path, monkeypatch):

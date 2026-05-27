@@ -124,14 +124,29 @@ class RiskRuleEngine:
             ))
 
         
-        daily_loss_pct = abs(daily_pnl / baseline * 100) if daily_pnl < 0 else 0
-        if daily_loss_pct > self.config.max_daily_loss_pct:
-            violations.append(RiskViolation(
-                rule="max_daily_loss_pct",
-                message=f"Daily loss {daily_loss_pct:.1f}% exceeds max {self.config.max_daily_loss_pct}%. Trading paused.",
-                value=daily_loss_pct,
-                limit=self.config.max_daily_loss_pct,
-            ))
+        
+        
+        
+        
+        
+        
+        
+        if not math.isfinite(daily_pnl):
+            logger.warning(
+                "RiskRuleEngine.check: daily_pnl is non-finite (%s) — "
+                "skipping per-BUY daily-loss rule for %s; standalone "
+                "check_daily_loss + force_delever remain in force",
+                daily_pnl, decision.symbol,
+            )
+        else:
+            daily_loss_pct = abs(daily_pnl / baseline * 100) if daily_pnl < 0 else 0
+            if daily_loss_pct > self.config.max_daily_loss_pct:
+                violations.append(RiskViolation(
+                    rule="max_daily_loss_pct",
+                    message=f"Daily loss {daily_loss_pct:.1f}% exceeds max {self.config.max_daily_loss_pct}%. Trading paused.",
+                    value=daily_loss_pct,
+                    limit=self.config.max_daily_loss_pct,
+                ))
 
         
         if self.config.require_stop_loss and decision.stop_loss <= 0:

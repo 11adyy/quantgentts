@@ -341,8 +341,17 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
         
         
         
-        if total_value > 0:
-            ret_pct = (daily_pnl / total_value) * 100
+        
+        
+        
+        
+        
+        
+        
+        
+        prior_equity = total_value - daily_pnl
+        if prior_equity > 0:
+            ret_pct = (daily_pnl / prior_equity) * 100
         else:
             ret_pct = 0.0
         
@@ -515,12 +524,18 @@ def _append_position_snapshot(lines: list[str], total_value: float | None) -> No
         sign = "+" if pnl >= 0 else ""
         return f"   {sym:<6} {sign}${pnl:>+8,.0f}  ({sign}{pct:+.1f}%)"
 
-    winners = [r for r in rows if r[5] > 0][:3]
+    
+    
+    
+    
+    
+    
+    winners = [r for r in rows if r[5] is not None and r[5] > 0][:3]
     if winners:
         lines.append("📈 Top winners:")
         for r in winners:
             lines.append(_row_line(r))
-    losers = [r for r in rows if r[5] < 0][-3:][::-1]
+    losers = [r for r in rows if r[5] is not None and r[5] < 0][-3:][::-1]
     if losers:
         lines.append("📉 Underwater:")
         for r in losers:
