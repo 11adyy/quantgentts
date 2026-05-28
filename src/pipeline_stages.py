@@ -761,46 +761,15 @@ class ExecutionStage:
                 
                 
                 
-                ok, stop_specs, wal_row_id = pipeline._cancel_stops_with_write_ahead(
-                    decision.symbol, position_qty,
-                )
-                if not ok:
-                    logger.warning(
-                        "Skipping %s %s: protective-stop clear failed; "
-                        "Alpaca would reject on held_for_orders",
-                        action_label, decision.symbol,
-                    )
-                    continue
-                order = pipeline.broker.submit_order(
-                    symbol=decision.symbol, qty=qty, side="sell",
-                    limit_price=sell_limit,
+                sale = pipeline._submit_protected_sell(
+                    symbol=decision.symbol, qty=qty, limit_price=sell_limit,
                     reference_price=existing[0].current_price,
+                    position_qty_before_sell=position_qty, label=action_label,
                 )
-                if not pipeline._order_accepted(order, decision.symbol, "sell"):
-                    if stop_specs:
-                        
-                        
-                        
-                        
-                        pipeline.broker._restore_stop_orders(
-                            decision.symbol, stop_specs, check_idempotency=False,
-                        )
+                if sale is None:
                     continue
-                
-                
-                
-                
-                
-                pending_protections.append({
-                    "order_id": order["id"], "symbol": decision.symbol,
-                    "position_qty_before_sell": position_qty,
-                    "specs": stop_specs,
-                    "wal_row_id": wal_row_id,
-                })
-                
-                
-                if isinstance(order, dict):
-                    order.setdefault("action", action_label)
+                order, prot = sale
+                pending_protections.append(prot)
                 orders.append(order)
                 sell_order_ids.append(order["id"])
                 pipeline.db.insert_trade(
