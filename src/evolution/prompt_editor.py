@@ -190,6 +190,25 @@ class PromptEditor:
         """
         report = ApplicationReport(period=reflection.period)
 
+        
+        
+        
+        
+        
+        if not self.config.enabled:
+            effective_mode = "OFF — evolution.enabled=false (observe only, nothing staged)"
+        elif self._dry_run:
+            effective_mode = (
+                "STAGE-ONLY — dry_run=true: proposals written to "
+                "proposed_edits.json for human review, NO prompt files modified"
+            )
+        else:
+            effective_mode = (
+                "LIVE-APPLY — dry_run=false: proposals will be written into "
+                "prompt files + git-committed"
+            )
+        logger.warning("PromptEditor effective mode: %s", effective_mode)
+
         if not self.config.enabled:
             
             for learning in reflection.proposed_learnings:

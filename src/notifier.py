@@ -379,16 +379,48 @@ def _pnl_history_table(lookback: int = 10) -> str | None:
 
 def _append_evening_body(lines: list[str], result: dict) -> None:
     
-    
-    
-    
-    
-    
-    
     analysis = result.get("analysis")
+
+    
+    
+    
+    
+    missing = result.get("missing_sessions")
+    if isinstance(missing, list) and missing:
+        if "morning" in missing:
+            lines.append(
+                "🔴 SESSION DID NOT RUN TODAY: morning — no agent activity "
+                "logged; check the timer/scheduler"
+            )
+        soft = [m for m in missing if m != "morning"]
+        if soft:
+            lines.append(f"⚠️ no activity logged today for: {', '.join(soft)}")
+
+    
+    
     risk_for_banner = _attr_or_key(analysis, "risk_rating")
     if isinstance(risk_for_banner, str) and risk_for_banner.lower() in ("elevated", "high"):
         lines.append(f"🚨 OPERATOR ATTENTION — risk_rating={risk_for_banner}")
+
+    
+    
+    
+    
+    
+    
+    dl_pnl = result.get("daily_pnl")
+    dl_tv = result.get("total_value")
+    dl_limit = result.get("max_daily_loss_pct")
+    if (isinstance(dl_pnl, (int, float)) and isinstance(dl_tv, (int, float))
+            and isinstance(dl_limit, (int, float)) and dl_limit > 0 and dl_pnl < 0):
+        prior_eq = dl_tv - dl_pnl
+        if prior_eq > 0:
+            loss_pct = abs(dl_pnl / prior_eq * 100)
+            if loss_pct >= 0.8 * dl_limit:
+                lines.append(
+                    f"🚨 DETERMINISTIC ALERT — daily loss {loss_pct:.2f}% is "
+                    f"≥80% of the {dl_limit:.0f}% circuit-breaker limit"
+                )
 
     
     
@@ -429,6 +461,21 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     
     
     
+    
+    
+    risk_for_actions = _attr_or_key(analysis, "risk_rating")
+    if isinstance(risk_for_actions, str) and risk_for_actions.lower() in ("elevated", "high"):
+        actions = _attr_or_key(analysis, "suggested_actions") or []
+        if isinstance(actions, list) and actions:
+            lines.append("⚡ Suggested actions:")
+            for act in actions[:5]:
+                if not isinstance(act, str):
+                    continue
+                lines.append(f"   • {act[:200]}")
+
+    
+    
+    
     _append_position_snapshot(lines, total_value)
 
     
@@ -453,22 +500,6 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     outlook = _attr_or_key(analysis, "tomorrow_outlook") or ""
     if outlook:
         lines.append(f"   {outlook[:280]}")
-
-    
-    
-    
-    
-    
-    
-    risk_for_actions = _attr_or_key(analysis, "risk_rating")
-    if isinstance(risk_for_actions, str) and risk_for_actions.lower() in ("elevated", "high"):
-        actions = _attr_or_key(analysis, "suggested_actions") or []
-        if isinstance(actions, list) and actions:
-            lines.append("⚡ Suggested actions:")
-            for act in actions[:5]:
-                if not isinstance(act, str):
-                    continue
-                lines.append(f"   • {act[:200]}")
 
     
     
