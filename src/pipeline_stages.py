@@ -778,7 +778,13 @@ class ExecutionStage:
                 )
                 if not pipeline._order_accepted(order, decision.symbol, "sell"):
                     if stop_specs:
-                        pipeline.broker._restore_stop_orders(decision.symbol, stop_specs)
+                        
+                        
+                        
+                        
+                        pipeline.broker._restore_stop_orders(
+                            decision.symbol, stop_specs, check_idempotency=False,
+                        )
                     continue
                 
                 
@@ -839,11 +845,23 @@ class ExecutionStage:
         
         
         for prot in pending_protections:
-            pipeline._finalize_protection_after_sell(
+            ok, _retry_specs = pipeline._finalize_protection_after_sell(
                 prot["order_id"], prot["symbol"],
                 prot["position_qty_before_sell"], prot["specs"],
                 wal_row_id=prot.get("wal_row_id"),
             )
+            if not ok:
+                
+                
+                
+                
+                
+                logger.warning(
+                    "ExecutionStage: finalize for %s (order %s) did not "
+                    "confirm stop coverage — recovery intent persisted; "
+                    "drain will rebuild next session",
+                    prot["symbol"], prot["order_id"],
+                )
 
         if sell_decisions:
             account, positions, price_map = pipeline._refresh_account_state()
