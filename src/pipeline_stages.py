@@ -844,24 +844,12 @@ class ExecutionStage:
         
         
         
-        for prot in pending_protections:
-            ok, _retry_specs = pipeline._finalize_protection_after_sell(
-                prot["order_id"], prot["symbol"],
-                prot["position_qty_before_sell"], prot["specs"],
-                wal_row_id=prot.get("wal_row_id"),
-            )
-            if not ok:
-                
-                
-                
-                
-                
-                logger.warning(
-                    "ExecutionStage: finalize for %s (order %s) did not "
-                    "confirm stop coverage — recovery intent persisted; "
-                    "drain will rebuild next session",
-                    prot["symbol"], prot["order_id"],
-                )
+        
+        
+        
+        pipeline._finalize_pending_protections(
+            pending_protections, context="ExecutionStage", wait=False,
+        )
 
         if sell_decisions:
             account, positions, price_map = pipeline._refresh_account_state()
