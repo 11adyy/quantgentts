@@ -5837,7 +5837,7 @@ class TradingPipeline:
         
         
         try:
-            pruned_n = self.news_store.prune(keep_days=120)
+            pruned_n = self.news_store.prune(keep_days=1000)
             if pruned_n:
                 logger.info("Pruned %d dated news artifact(s)", pruned_n)
         except Exception as e:
