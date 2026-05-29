@@ -366,10 +366,19 @@ class Database:
         with self._lock:
             try:
                 self.conn.execute("BEGIN")
+                
+                
+                
+                
                 self.conn.execute(
-                    "INSERT OR REPLACE INTO daily_pnl "
+                    "INSERT INTO daily_pnl "
                     "(date, total_value, daily_pnl, daily_return_pct, equity_close) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(date) DO UPDATE SET "
+                    "total_value=excluded.total_value, "
+                    "daily_pnl=excluded.daily_pnl, "
+                    "daily_return_pct=excluded.daily_return_pct, "
+                    "equity_close=COALESCE(excluded.equity_close, daily_pnl.equity_close)",
                     (date, total_value, daily_pnl, daily_return_pct, equity_close),
                 )
                 self.conn.execute(
@@ -948,10 +957,18 @@ class Database:
     def insert_daily_pnl(self, date: str, total_value: float, daily_pnl: float,
                          daily_return_pct: float, equity_close: float | None = None):
         with self._lock:
+            
+            
+            
             self.conn.execute(
-                """INSERT OR REPLACE INTO daily_pnl
+                """INSERT INTO daily_pnl
                    (date, total_value, daily_pnl, daily_return_pct, equity_close)
-                   VALUES (?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(date) DO UPDATE SET
+                     total_value=excluded.total_value,
+                     daily_pnl=excluded.daily_pnl,
+                     daily_return_pct=excluded.daily_return_pct,
+                     equity_close=COALESCE(excluded.equity_close, daily_pnl.equity_close)""",
                 (date, total_value, daily_pnl, daily_return_pct, equity_close),
             )
             self.conn.commit()

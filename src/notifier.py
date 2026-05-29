@@ -342,7 +342,7 @@ def _pnl_history_table(lookback: int = 10) -> str | None:
         conn = sqlite3.connect(str(_DB_PATH))
         try:
             rows = conn.execute(
-                "SELECT date, total_value, daily_pnl, daily_return_pct "
+                "SELECT date, total_value, daily_pnl, daily_return_pct, equity_close "
                 "FROM daily_pnl ORDER BY date DESC LIMIT ?",
                 (lookback,),
             ).fetchall()
@@ -365,6 +365,8 @@ def _pnl_history_table(lookback: int = 10) -> str | None:
     
     
     
+    
+    
     first_tv, first_pnl = rows[0][1], rows[0][2]
     running_nav = (first_tv - (first_pnl or 0.0)) if first_tv is not None else 0.0
 
@@ -374,15 +376,27 @@ def _pnl_history_table(lookback: int = 10) -> str | None:
         f"{'NAV':>11}  {'Cumul P&L':>9}  {'Drawdown':>8}"
     )
     table_lines.append("─" * 76)
-    for date, total_value, daily_pnl, daily_ret in rows:
-        cum += (daily_pnl or 0.0)
-        running_nav += (daily_pnl or 0.0)
+    for date, total_value, daily_pnl, daily_ret, equity_close in rows:
+        prev_nav = running_nav
+        if equity_close is not None:
+            running_nav = equity_close          
+        else:
+            running_nav += (daily_pnl or 0.0)   
+        row_pnl = running_nav - prev_nav        
+        cum += row_pnl
 
         if peak_nav is None or running_nav > peak_nav:
             peak_nav = running_nav
 
-        pnl_str = f"{daily_pnl:+,.2f}" if daily_pnl is not None else "?"
-        ret_str = f"{daily_ret:+.2f}%" if daily_ret is not None else "?"
+        pnl_str = f"{row_pnl:+,.2f}"
+        
+        
+        if prev_nav and prev_nav > 0:
+            ret_str = f"{(row_pnl / prev_nav * 100):+.2f}%"
+        elif daily_ret is not None:
+            ret_str = f"{daily_ret:+.2f}%"
+        else:
+            ret_str = "?"
         spy_ret = spy_returns.get(date)
         spy_str = f"{spy_ret:+.2f}%" if spy_ret is not None else "  n/a"
         nav_str = f"${running_nav:,.2f}"
@@ -435,19 +449,32 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     
     
     
-    dl_pnl = result.get("daily_pnl")
-    dl_tv = result.get("total_value")
+    
+    
+    
+    
+    
+    
+    esc_pnl = result.get("pnl_4pm")
+    esc_close = result.get("equity_close")
+    if esc_pnl is not None and isinstance(esc_close, (int, float)):
+        esc_base = esc_close - esc_pnl
+    else:
+        esc_pnl = result.get("daily_pnl")
+        esc_tv = result.get("total_value")
+        esc_base = (esc_tv - esc_pnl) if (
+            isinstance(esc_pnl, (int, float)) and isinstance(esc_tv, (int, float))
+        ) else None
     dl_limit = result.get("max_daily_loss_pct")
-    if (isinstance(dl_pnl, (int, float)) and isinstance(dl_tv, (int, float))
-            and isinstance(dl_limit, (int, float)) and dl_limit > 0 and dl_pnl < 0):
-        prior_eq = dl_tv - dl_pnl
-        if prior_eq > 0:
-            loss_pct = abs(dl_pnl / prior_eq * 100)
-            if loss_pct >= 0.8 * dl_limit:
-                lines.append(
-                    f"🚨 DETERMINISTIC ALERT — daily loss {loss_pct:.2f}% is "
-                    f"≥80% of the {dl_limit:.0f}% circuit-breaker limit"
-                )
+    if (isinstance(esc_pnl, (int, float)) and isinstance(esc_base, (int, float))
+            and isinstance(dl_limit, (int, float)) and dl_limit > 0
+            and esc_pnl < 0 and esc_base > 0):
+        loss_pct = abs(esc_pnl / esc_base * 100)
+        if loss_pct >= 0.8 * dl_limit:
+            lines.append(
+                f"🚨 DETERMINISTIC ALERT — daily loss {loss_pct:.2f}% is "
+                f"≥80% of the {dl_limit:.0f}% circuit-breaker limit"
+            )
 
     
     
@@ -466,7 +493,7 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     def _fmt_pnl(v: float) -> str:
         return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
 
-    if pnl_4pm is not None and equity_close:
+    if pnl_4pm is not None and equity_close is not None:
         
         baseline = equity_close - pnl_4pm
         if baseline > 0:

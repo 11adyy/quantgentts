@@ -1007,3 +1007,81 @@ def test_format_evening_falls_back_to_realtime_when_no_4pm():
     msg = format_session_result("evening", result, 10.0)
     assert "💰 Daily P&L: +$1,234.56" in msg
     assert "4pm close" not in msg
+
+
+def test_format_evening_4pm_path_when_equity_close_zero():
+    """[A] equity_close == 0.0 (account liquidated at exactly $0) is a VALID
+    value — the headline must still take the 4pm path, not fall back (the old
+    truthy check treated 0.0 as 'unavailable')."""
+    result = {
+        "status": "analyzed", "run_id": "r",
+        "daily_pnl": -50.0, "total_value": 10.0,          
+        "pnl_4pm": -100.0, "equity_close": 0.0,            
+        "analysis": {"risk_rating": "low"},
+    }
+    msg = format_session_result("evening", result, 10.0)
+    assert "💰 Daily P&L: -$100.00" in msg
+    assert "4pm close" in msg                              
+    assert "   Equity: $0.00" in msg
+
+
+def test_deterministic_escalation_uses_4pm_basis_not_realtime():
+    """[B] The deterministic alert must evaluate the SAME 4pm basis as the
+    headline. Here the 4pm loss is 4.5% (≥80% of the 5% cap → fire) while the
+    real-time daily_pnl is tiny — proves it no longer keys off daily_pnl."""
+    result = {
+        "status": "analyzed", "run_id": "r",
+        "daily_pnl": -100.0, "total_value": 99_900.0,      
+        "pnl_4pm": -4500.0, "equity_close": 95_500.0,      
+        "max_daily_loss_pct": 5.0,
+        "analysis": {"risk_rating": "low"},                
+    }
+    msg = format_session_result("evening", result, 10.0)
+    assert "DETERMINISTIC ALERT" in msg
+
+
+def test_deterministic_escalation_ignores_realtime_loss_when_4pm_small():
+    """[B] inverse: a big real-time AH loss must NOT fire the alert when the
+    4pm close-to-close loss is small (the 4pm basis is authoritative)."""
+    result = {
+        "status": "analyzed", "run_id": "r",
+        "daily_pnl": -4500.0, "total_value": 95_500.0,     
+        "pnl_4pm": -100.0, "equity_close": 99_900.0,       
+        "max_daily_loss_pct": 5.0,
+        "analysis": {"risk_rating": "low"},
+    }
+    msg = format_session_result("evening", result, 10.0)
+    assert "DETERMINISTIC ALERT" not in msg
+
+
+def test_pnl_history_table_uses_equity_close_for_4pm_consistency(tmp_path, monkeypatch):
+    """[C] The table anchors NAV + per-row P&L on equity_close, so today's row
+    shows the 4pm-to-4pm P&L (matching the headline) — NOT the real-time
+    daily_pnl. Regression against the headline/table contradiction."""
+    import sqlite3
+    from src.notifier import _pnl_history_table
+    db_dir = tmp_path / "data"; db_dir.mkdir()
+    dbp = db_dir / "quantgents.db"
+    monkeypatch.setattr("src.notifier._DB_PATH", dbp)
+    monkeypatch.setattr("src.notifier._spy_daily_returns", lambda dates: {})  
+    conn = sqlite3.connect(str(dbp))
+    conn.execute(
+        "CREATE TABLE daily_pnl (date TEXT PRIMARY KEY, total_value REAL, "
+        "daily_pnl REAL, daily_return_pct REAL, equity_close REAL)"
+    )
+    conn.executemany(
+        "INSERT INTO daily_pnl VALUES (?,?,?,?,?)",
+        [
+            
+            ("2026-05-27", 100_400.0, 400.0, 0.40, 100_300.0),   
+            ("2026-05-28", 101_200.0, 1200.0, 1.20, 100_500.0),  
+        ],
+    )
+    conn.commit(); conn.close()
+
+    table = _pnl_history_table(lookback=10)
+    assert table is not None
+    today_line = [ln for ln in table.splitlines() if ln.startswith("2026-05-28")][0]
+    assert "+200.00" in today_line          
+    assert "+1,200" not in today_line        
+    assert "$100,500.00" in today_line       
