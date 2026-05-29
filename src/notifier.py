@@ -451,38 +451,43 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
 
     
     
+    
+    
+    
+    
+    
+    
+    
     daily_pnl = result.get("daily_pnl")
     total_value = result.get("total_value")
-    daily_ret = result.get("daily_return_pct")
-    if daily_pnl is not None and total_value is not None:
+    pnl_4pm = result.get("pnl_4pm")
+    equity_close = result.get("equity_close")
+
+    def _fmt_pnl(v: float) -> str:
+        return f"+${v:,.2f}" if v >= 0 else f"-${abs(v):,.2f}"
+
+    if pnl_4pm is not None and equity_close:
         
-        
-        
-        
-        
-        
-        
-        
+        baseline = equity_close - pnl_4pm
+        if baseline > 0:
+            r = pnl_4pm / baseline * 100
+            ret_str = f"+{r:.2f}%" if pnl_4pm >= 0 else f"{r:.2f}%"
+        else:
+            ret_str = "n/a"
+        lines.append(f"💰 Daily P&L: {_fmt_pnl(pnl_4pm)} ({ret_str})  ·  4pm close")
+        lines.append(f"   Equity: ${equity_close:,.2f}")
+    elif daily_pnl is not None and total_value is not None:
         
         
         
         prior_equity = total_value - daily_pnl
-        
-        
-        if daily_pnl >= 0:
-            pnl_str = f"+${daily_pnl:,.2f}"
-        else:
-            pnl_str = f"-${abs(daily_pnl):,.2f}"
         if prior_equity > 0:
             ret_pct = (daily_pnl / prior_equity) * 100
-            
             ret_str = f"+{ret_pct:.2f}%" if daily_pnl >= 0 else f"{ret_pct:.2f}%"
         else:
             
-            
-            
             ret_str = "n/a"
-        lines.append(f"💰 Daily P&L: {pnl_str} ({ret_str})")
+        lines.append(f"💰 Daily P&L: {_fmt_pnl(daily_pnl)} ({ret_str})")
         lines.append(f"   Equity: ${total_value:,.2f}")
 
     

@@ -5777,11 +5777,39 @@ class TradingPipeline:
         
         
         
+        
+        
+        
+        
+        equity_close = None
+        pnl_4pm = None
+        pnl_4pm_pct = None
+        try:
+            closes = self.broker.get_recent_daily_closes(lookback_days=10)
+            if closes and closes[-1][0] == today_str:
+                equity_close = closes[-1][1]
+                prev_close = closes[-2][1] if len(closes) >= 2 else None
+                if prev_close:
+                    pnl_4pm = equity_close - prev_close
+                    pnl_4pm_pct = pnl_4pm / prev_close * 100
+            elif closes:
+                logger.info(
+                    "4pm snapshot: portfolio_history latest date %s != today %s "
+                    "(API lag?) — evening uses the real-time P&L fallback",
+                    closes[-1][0], today_str,
+                )
+        except Exception as e:
+            logger.warning("4pm snapshot fetch failed: %s — using real-time P&L", e)
+
+        
+        
+        
         if analysis:
             self.db.save_evening_snapshot(
                 date=today_str,
                 total_value=total_value, daily_pnl=daily_pnl,
                 daily_return_pct=daily_return_pct,
+                equity_close=equity_close,
                 tomorrow_outlook=analysis.tomorrow_outlook,
                 lessons=analysis.lessons,
                 suggested_actions=analysis.suggested_actions,
@@ -5806,6 +5834,7 @@ class TradingPipeline:
                 total_value=total_value,
                 daily_pnl=daily_pnl,
                 daily_return_pct=daily_return_pct,
+                equity_close=equity_close,
             )
 
         
@@ -5881,6 +5910,11 @@ class TradingPipeline:
                 getattr(self.config, "risk", None), "max_daily_loss_pct", None,
             ),
             "stop_coverage_gaps": coverage_gaps,
+            
+            
+            "equity_close": equity_close,
+            "pnl_4pm": pnl_4pm,
+            "pnl_4pm_pct": pnl_4pm_pct,
         }
 
     def _expected_sessions_missing_today(self) -> list[str]:
