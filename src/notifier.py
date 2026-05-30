@@ -672,8 +672,8 @@ def _append_position_snapshot(lines: list[str], total_value: float | None) -> No
     def _row_line(r: tuple) -> str:
         sym, qty, avg, curr, mv, pnl = r
         pct = ((curr / avg - 1) * 100) if avg else 0
-        sign = "+" if pnl >= 0 else ""
-        return f"   {sym:<6} {sign}${pnl:>+8,.0f}  ({sign}{pct:+.1f}%)"
+        sign = "+" if pnl >= 0 else "-"
+        return f"   {sym:<6} {sign}${abs(pnl):>8,.0f}  ({pct:+.1f}%)"
 
     
     
