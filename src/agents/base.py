@@ -94,6 +94,15 @@ def _is_openai_model(model: str) -> bool:
 
 
 
+
+
+
+_FALLBACK_MODEL = "claude-opus-4-7"
+
+
+
+
+
 _RETRYABLE_EXC_NAMES = frozenset({
     "APIConnectionError", "APITimeoutError", "APIConnectionTimeoutError",
     "InternalServerError", "RateLimitError", "APIError",
@@ -234,10 +243,17 @@ class AgentResult:
 
 
 class BaseAgent(ABC):
-    def __init__(self, api_key: str, model: str, max_tokens: int = 4096):
+    def __init__(self, api_key: str, model: str, max_tokens: int = 4096,
+                 fallback_api_key: str = ""):
         self.model = model
         self.max_tokens = max_tokens
         self._use_openai = _is_openai_model(model)
+        
+        
+        
+        
+        
+        self._fallback_api_key = (fallback_api_key or "").strip()
 
         if self._use_openai:
             from openai import OpenAI
@@ -267,34 +283,52 @@ class BaseAgent(ABC):
 
         max_retries = _max_retries()
         finish_reason: str | None = None
+        primary_error: Exception | None = None
         for attempt in range(max_retries):
             try:
                 if self._use_openai:
                     raw_text, input_tokens, output_tokens, finish_reason = self._call_openai(user_message)
                 else:
                     raw_text, input_tokens, output_tokens, finish_reason = self._call_anthropic(user_message)
+                primary_error = None
                 break
             except Exception as e:
+                primary_error = e
                 
                 
                 
                 if not _is_retryable(e):
                     logger.warning(
                         "Agent %s attempt %d hit a non-retryable error: %s. "
-                        "Failing fast (no retry).", self.name, attempt + 1, e,
+                        "No more retries.", self.name, attempt + 1, e,
                     )
-                    raise
+                    break
                 
                 
                 if attempt == max_retries - 1:
-                    logger.warning("Agent %s attempt %d failed: %s. Giving up.",
+                    logger.warning("Agent %s attempt %d failed: %s. Primary exhausted.",
                                    self.name, attempt + 1, e)
-                    raise
+                    break
                 wait = _retry_backoff_seconds(attempt)
                 logger.warning("Agent %s attempt %d failed: %s. Retrying in %.1fs...",
                                self.name, attempt + 1, e, wait)
                 import time
                 time.sleep(wait)
+
+        
+        actual_model = self.model
+        if primary_error is not None:
+            
+            
+            
+            
+            failover = None
+            if self._use_openai and self._fallback_api_key:
+                failover = self._try_failover(user_message, primary_error)
+            if failover is None:
+                raise primary_error
+            raw_text, input_tokens, output_tokens, finish_reason = failover
+            actual_model = _FALLBACK_MODEL
 
         
         
@@ -327,17 +361,17 @@ class BaseAgent(ABC):
                 self.name,
             )
         else:
-            cost = estimate_cost(self.model, input_tokens, output_tokens)
+            cost = estimate_cost(actual_model, input_tokens, output_tokens)
         logger.info(
             "Agent %s completed | tokens in=%d out=%d total=%d | cost=%s | model=%s",
             self.name, input_tokens, output_tokens, tokens,
-            fmt_cost(cost), self.model,
+            fmt_cost(cost), actual_model,
         )
         logger.info("Agent %s output:\n%s", self.name, raw_text)
         return AgentResult(
             raw_text=raw_text,
             tokens_used=tokens,
-            model=self.model,
+            model=actual_model,
             user_message=user_message,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -346,16 +380,17 @@ class BaseAgent(ABC):
             truncated=truncated,
         )
 
-    def _call_anthropic(self, user_message: str) -> tuple[str, int, int, str | None]:
-        
-        
-        
-        
-        
-        
-        
-        response = self.client.messages.create(
-            model=self.model,
+    def _anthropic_call(self, client, model: str, user_message: str) -> tuple[str, int, int, str | None]:
+        """One Anthropic messages.create against an arbitrary client+model.
+
+        Shared by the primary path (_call_anthropic) and the OpenAI->Anthropic
+        failover (_try_failover) so both use the identical request shape +
+        usage/finish-reason extraction. System prompt is sent as an ephemeral
+        cache breakpoint (static per agent → cheaper + lower latency; no-op
+        below the cache minimum, safe unconditionally).
+        """
+        response = client.messages.create(
+            model=model,
             max_tokens=self.max_tokens,
             system=[{
                 "type": "text",
@@ -372,6 +407,37 @@ class BaseAgent(ABC):
             logger.warning("Anthropic returned empty content (stop_reason=%s)", finish_reason)
             return ("", in_tok, out_tok, finish_reason)
         return (response.content[0].text, in_tok, out_tok, finish_reason)
+
+    def _call_anthropic(self, user_message: str) -> tuple[str, int, int, str | None]:
+        return self._anthropic_call(self.client, self.model, user_message)
+
+    def _try_failover(self, user_message: str, primary_error: Exception):
+        """OpenAI primary failed → attempt ONE Anthropic call with the fallback
+        model. Returns the (text, in_tok, out_tok, finish_reason) tuple on
+        success, or None on failure (caller re-raises the original OpenAI
+        error). Single-shot: the primary already burned its retry budget, so a
+        second full budget here could blow the session window. Loud logging
+        either way — a provider failover is an event the operator must see.
+        """
+        logger.error(
+            "Agent %s: primary OpenAI failed after retries (%s) — failing over "
+            "to %s on Anthropic.", self.name, primary_error, _FALLBACK_MODEL,
+        )
+        try:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=self._fallback_api_key, timeout=_LLM_HTTP_TIMEOUT)
+            result = self._anthropic_call(client, _FALLBACK_MODEL, user_message)
+            logger.warning(
+                "Agent %s: FAILOVER to %s SUCCEEDED (in=%d out=%d) — session "
+                "continues on Anthropic.", self.name, _FALLBACK_MODEL, result[1], result[2],
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Agent %s: failover to %s also FAILED: %s. Re-raising the "
+                "original OpenAI error.", self.name, _FALLBACK_MODEL, exc,
+            )
+            return None
 
     def _call_openai(self, user_message: str) -> tuple[str, int, int, str | None]:
         response = self.client.chat.completions.create(
