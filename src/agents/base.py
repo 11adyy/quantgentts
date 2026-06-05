@@ -21,6 +21,32 @@ _OPENAI_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
 
 
 
+_DEEPSEEK_PREFIXES = ("deepseek-",)
+_DEEPSEEK_BASE_URL = "https://api.deepseek.com"  
+
+
+
+
+
+
+
+
+_DEEPSEEK_MAX_OUTPUT = {
+    "deepseek-v4-flash": 384000,
+    "deepseek-v4-pro":   384000,
+    "deepseek-chat":     384000,  
+    "deepseek-reasoner": 384000,  
+}
+_DEEPSEEK_DEFAULT_CEILING = 8192  
+
+
+
+
+
+
+
+
+
 
 
 
@@ -91,6 +117,11 @@ def _is_openai_model(model: str) -> bool:
     return any(model.startswith(p) for p in _OPENAI_PREFIXES)
 
 
+def _is_deepseek_model(model: str) -> bool:
+    return any(model.startswith(p) for p in _DEEPSEEK_PREFIXES)
+
+
+
 
 
 
@@ -131,6 +162,12 @@ def _is_retryable(exc: Exception) -> bool:
         return True
     status = getattr(exc, "status_code", None)
     if isinstance(status, int):
+        
+        
+        
+        
+        if status == 402:
+            return False
         return status == 429 or status >= 500
     
     
@@ -247,6 +284,7 @@ class BaseAgent(ABC):
                  fallback_api_key: str = ""):
         self.model = model
         self.max_tokens = max_tokens
+        self._use_deepseek = _is_deepseek_model(model)
         self._use_openai = _is_openai_model(model)
         
         
@@ -255,7 +293,12 @@ class BaseAgent(ABC):
         
         self._fallback_api_key = (fallback_api_key or "").strip()
 
-        if self._use_openai:
+        if self._use_deepseek:
+            
+            from openai import OpenAI
+            self.client = OpenAI(api_key=api_key, base_url=_DEEPSEEK_BASE_URL,
+                                 timeout=_LLM_HTTP_TIMEOUT)
+        elif self._use_openai:
             from openai import OpenAI
             self.client = OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
         else:
@@ -286,7 +329,9 @@ class BaseAgent(ABC):
         primary_error: Exception | None = None
         for attempt in range(max_retries):
             try:
-                if self._use_openai:
+                if self._use_deepseek:
+                    raw_text, input_tokens, output_tokens, finish_reason = self._call_deepseek(user_message)
+                elif self._use_openai:
                     raw_text, input_tokens, output_tokens, finish_reason = self._call_openai(user_message)
                 else:
                     raw_text, input_tokens, output_tokens, finish_reason = self._call_anthropic(user_message)
@@ -322,8 +367,11 @@ class BaseAgent(ABC):
             
             
             
+            
+            
+            
             failover = None
-            if self._use_openai and self._fallback_api_key:
+            if (self._use_openai or self._use_deepseek) and self._fallback_api_key:
                 failover = self._try_failover(user_message, primary_error)
             if failover is None:
                 raise primary_error
@@ -334,7 +382,11 @@ class BaseAgent(ABC):
         
         
         truncated = isinstance(finish_reason, str) and finish_reason.lower() in (
-            "max_tokens", "length",
+            
+            
+            
+            
+            "max_tokens", "length", "insufficient_system_resource",
         )
         if truncated:
             logger.warning(
@@ -383,8 +435,8 @@ class BaseAgent(ABC):
     def _anthropic_call(self, client, model: str, user_message: str) -> tuple[str, int, int, str | None]:
         """One Anthropic messages.create against an arbitrary client+model.
 
-        Shared by the primary path (_call_anthropic) and the OpenAI->Anthropic
-        failover (_try_failover) so both use the identical request shape +
+        Shared by the primary path (_call_anthropic) and the provider-agnostic
+        failover to Anthropic (_try_failover) so both use the identical request shape +
         usage/finish-reason extraction. System prompt is sent as an ephemeral
         cache breakpoint (static per agent → cheaper + lower latency; no-op
         below the cache minimum, safe unconditionally).
@@ -412,16 +464,17 @@ class BaseAgent(ABC):
         return self._anthropic_call(self.client, self.model, user_message)
 
     def _try_failover(self, user_message: str, primary_error: Exception):
-        """OpenAI primary failed → attempt ONE Anthropic call with the fallback
-        model. Returns the (text, in_tok, out_tok, finish_reason) tuple on
-        success, or None on failure (caller re-raises the original OpenAI
-        error). Single-shot: the primary already burned its retry budget, so a
+        """Primary provider (OpenAI or DeepSeek) failed → attempt ONE Anthropic
+        call with the fallback model. Returns the (text, in_tok, out_tok,
+        finish_reason) tuple on success, or None on failure (caller re-raises
+        the original primary error). Single-shot: the primary already burned its
+        retry budget, so a
         second full budget here could blow the session window. Loud logging
         either way — a provider failover is an event the operator must see.
         """
         logger.error(
-            "Agent %s: primary OpenAI failed after retries (%s) — failing over "
-            "to %s on Anthropic.", self.name, primary_error, _FALLBACK_MODEL,
+            "Agent %s: primary model %s failed after retries (%s) — failing over "
+            "to %s on Anthropic.", self.name, self.model, primary_error, _FALLBACK_MODEL,
         )
         try:
             from anthropic import Anthropic
@@ -435,7 +488,7 @@ class BaseAgent(ABC):
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Agent %s: failover to %s also FAILED: %s. Re-raising the "
-                "original OpenAI error.", self.name, _FALLBACK_MODEL, exc,
+                "original primary error.", self.name, _FALLBACK_MODEL, exc,
             )
             return None
 
@@ -457,6 +510,47 @@ class BaseAgent(ABC):
         finish_reason = getattr(choice, "finish_reason", None)
         if not isinstance(finish_reason, str):
             finish_reason = None
+        return (content, in_tok, out_tok, finish_reason)
+
+    def _deepseek_max_output(self) -> int:
+        """Clamp ceiling for this DeepSeek model. DeepSeek REJECTS (does not
+        clamp) a max_tokens above the model limit, so we cap client-side."""
+        return _DEEPSEEK_MAX_OUTPUT.get(self.model, _DEEPSEEK_DEFAULT_CEILING)
+
+    def _call_deepseek(self, user_message: str) -> tuple[str, int, int, str | None]:
+        """DeepSeek via the OpenAI SDK (custom base_url). Three deltas vs
+        _call_openai:
+          1. Sends `max_tokens` (DeepSeek ignores OpenAI's `max_completion_tokens`
+             → output would silently fall back to a ~4096 default and truncate).
+          2. Clamps to the per-model output ceiling (DeepSeek 400s on over-ceiling
+             values instead of clamping).
+          3. Reads the non-standard reasoning_content defensively. We DISCARD the
+             chain-of-thought (every agent parses JSON from `content`), but log its
+             presence so an empty-content / full-CoT truncation is visible rather
+             than looking like a clean "no signal".
+        Usage is OpenAI-shaped (prompt_tokens / completion_tokens) → reuse
+        _extract_openai_usage.
+        """
+        response = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=min(self.max_tokens, self._deepseek_max_output()),
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        finish_reason = getattr(choice, "finish_reason", None)
+        if not isinstance(finish_reason, str):
+            finish_reason = None
+        if not content:
+            reasoning = getattr(choice.message, "reasoning_content", None)
+            logger.warning(
+                "DeepSeek returned empty content (finish_reason=%s, reasoning_content present=%s)",
+                finish_reason, bool(reasoning),
+            )
+        in_tok, out_tok = _extract_openai_usage(response, self.name)
         return (content, in_tok, out_tok, finish_reason)
 
 

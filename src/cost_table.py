@@ -5,6 +5,9 @@ input/output token counts returned by each provider, and by
 `src/notifier.py` to surface session-level cost in Telegram pushes.
 
 **Pricing source priority** (highest first):
+  0. `_PRICING_PINNED` — verified-official rates for models where LiteLLM is
+     KNOWN-STALE (currently DeepSeek). Structurally immune to cache refresh
+     (`_apply_litellm_data` only iterates `_PRICING_FALLBACK` keys).
   1. `data/pricing_cache.json` — fetched from LiteLLM upstream JSON.
      Refreshed automatically every 24h via `refresh_pricing()` (also
      callable on-demand via `scripts/refresh_pricing.py`).
@@ -79,7 +82,29 @@ _PRICING_FALLBACK: dict[str, dict[str, float]] = {
 
 
 
-PRICING: dict[str, dict[str, float]] = dict(_PRICING_FALLBACK)
+
+
+
+
+
+
+
+
+
+
+
+
+_PRICING_PINNED: dict[str, dict[str, float]] = {
+    "deepseek-v4-flash":   {"input": 0.14,  "output": 0.28},
+    "deepseek-v4-pro":     {"input": 0.435, "output": 0.87},
+    "deepseek-chat":       {"input": 0.14,  "output": 0.28},   
+    "deepseek-reasoner":   {"input": 0.14,  "output": 0.28},   
+}
+
+
+
+
+PRICING: dict[str, dict[str, float]] = {**_PRICING_FALLBACK, **_PRICING_PINNED}
 
 
 def _rates_from_entry(entry: object) -> dict[str, float] | None:
