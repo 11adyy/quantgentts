@@ -233,9 +233,10 @@ class TradeDecision(BaseModel):
 class ReasoningChain(BaseModel):
     """7-step CoT for the portfolio manager — forces the audit trail on the
     central decision. Every required field has `min_length=1` so the LLM
-    can't dodge a step with `""`. continuity_check is intentionally
-    optional (defaults to `""`) for backward-compat with pre-memory-layer
-    logs; everything else is mandatory.
+    can't dodge a step with `""`. continuity_check AND premortem_check are
+    intentionally optional (default `""`) for backward-compat with older logs
+    (pre-memory-layer / pre-2026-06 respectively) but are mandatory per the
+    prompt; everything else is mandatory at the schema layer too.
     """
     macro_filter: str = Field(min_length=1)
     news_check: str = Field(min_length=1)
@@ -247,6 +248,12 @@ class ReasoningChain(BaseModel):
     
     
     continuity_check: str = ""
+    
+    
+    
+    
+    
+    premortem_check: str = ""
 
 
 class TargetPosition(BaseModel):
