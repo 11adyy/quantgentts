@@ -41,3 +41,4 @@ def _isolate_cwd(tmp_path, monkeypatch):
     
     
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_CA_BUNDLE", raising=False)

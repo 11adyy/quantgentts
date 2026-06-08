@@ -307,7 +307,22 @@ class BaseAgent(ABC):
             
             
             base_url = os.environ.get("OPENAI_BASE_URL", "").strip() or None
-            self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
+            
+            
+            
+            
+            
+            
+            
+            ca_bundle = os.environ.get("OPENAI_CA_BUNDLE", "").strip()
+            if ca_bundle:
+                import httpx
+                self.client = OpenAI(
+                    api_key=api_key, base_url=base_url,
+                    http_client=httpx.Client(verify=ca_bundle, timeout=_LLM_HTTP_TIMEOUT),
+                )
+            else:
+                self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
         else:
             from anthropic import Anthropic
             self.client = Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
