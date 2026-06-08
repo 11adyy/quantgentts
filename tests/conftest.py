@@ -36,3 +36,8 @@ def _isolate_cwd(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(requests, "get", _no_network)
+
+    
+    
+    
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)

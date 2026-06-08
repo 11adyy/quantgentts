@@ -300,7 +300,14 @@ class BaseAgent(ABC):
                                  timeout=_LLM_HTTP_TIMEOUT)
         elif self._use_openai:
             from openai import OpenAI
-            self.client = OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
+            
+            
+            
+            
+            
+            
+            base_url = os.environ.get("OPENAI_BASE_URL", "").strip() or None
+            self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
         else:
             from anthropic import Anthropic
             self.client = Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
