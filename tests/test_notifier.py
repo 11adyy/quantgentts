@@ -937,9 +937,11 @@ def test_format_evening_missing_morning_session_is_red():
     assert "midday" in msg  
 
 
-def test_format_evening_suggested_actions_precede_history_table():
-    """Suggested actions must appear ABOVE the long P&L history table so the
-    tail-clip truncation can't eat them on high-risk days."""
+def test_format_evening_suggested_actions_render_high_in_message():
+    """Suggested actions must appear high in the message (right after the
+    headline P&L) so the tail-clip truncation can't eat them on high-risk
+    days. (The P&L history table they used to precede was replaced by the
+    daily CSV export — PR #99.)"""
     result = {
         "status": "analyzed", "run_id": "r",
         "daily_pnl": -100.0, "total_value": 100_000.0,
@@ -1052,36 +1054,3 @@ def test_deterministic_escalation_ignores_realtime_loss_when_4pm_small():
     }
     msg = format_session_result("evening", result, 10.0)
     assert "DETERMINISTIC ALERT" not in msg
-
-
-def test_pnl_history_table_uses_equity_close_for_4pm_consistency(tmp_path, monkeypatch):
-    """[C] The table anchors NAV + per-row P&L on equity_close, so today's row
-    shows the 4pm-to-4pm P&L (matching the headline) — NOT the real-time
-    daily_pnl. Regression against the headline/table contradiction."""
-    import sqlite3
-    from src.notifier import _pnl_history_table
-    db_dir = tmp_path / "data"; db_dir.mkdir()
-    dbp = db_dir / "quantgents.db"
-    monkeypatch.setattr("src.notifier._DB_PATH", dbp)
-    monkeypatch.setattr("src.notifier._spy_daily_returns", lambda dates: {})  
-    conn = sqlite3.connect(str(dbp))
-    conn.execute(
-        "CREATE TABLE daily_pnl (date TEXT PRIMARY KEY, total_value REAL, "
-        "daily_pnl REAL, daily_return_pct REAL, equity_close REAL)"
-    )
-    conn.executemany(
-        "INSERT INTO daily_pnl VALUES (?,?,?,?,?)",
-        [
-            
-            ("2026-05-27", 100_400.0, 400.0, 0.40, 100_300.0),   
-            ("2026-05-28", 101_200.0, 1200.0, 1.20, 100_500.0),  
-        ],
-    )
-    conn.commit(); conn.close()
-
-    table = _pnl_history_table(lookback=10)
-    assert table is not None
-    today_line = [ln for ln in table.splitlines() if ln.startswith("2026-05-28")][0]
-    assert "+200.00" in today_line          
-    assert "+1,200" not in today_line        
-    assert "$100,500.00" in today_line       

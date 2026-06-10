@@ -50,7 +50,7 @@ def main():
         "--mode",
         choices=[
             "live", "once", "morning", "midday", "close", "evening",
-            "intra_check", "earnings_preprocess", "meta", "weekly",
+            "intra_check", "earnings_preprocess", "meta", "daily",
         ],
         default="once", help="Run mode",
     )
@@ -65,16 +65,6 @@ def main():
     )
     args = parser.parse_args()
 
-    config_path = Path(args.config)
-    if not config_path.is_absolute():
-        config_path = PROJECT_ROOT / config_path
-    if not config_path.exists():
-        logger.error("Config file not found: %s", config_path)
-        sys.exit(1)
-
-    config = load_config(config_path)
-    logger.info("Config loaded. Universe: %s, Paper: %s", config.trading.universe, config.alpaca.paper)
-
     
     
     
@@ -83,43 +73,79 @@ def main():
     
     
     
-    if not config.alpaca.paper:
-        logger.warning(
-            "LIVE TRADING ENABLED (alpaca.paper=false). Real-money orders "
-            "will be submitted via the Alpaca API key from .env. To revert "
-            "to paper trading, set `alpaca.paper: true` in your config."
-        )
-
     
     
     
     
     
-    try:
-        refresh_pricing()
-    except Exception as exc:
-        logger.warning("pricing refresh failed at startup: %s", exc)
-
+    
+    
+    
     notifier = TelegramNotifier()
-
-    if args.mode == "live":
-        
-        
-        
-        
-        
-        
-        notifier.send("🟢 quantgents live scheduler starting")
-        scheduler = TradingScheduler(config)
-        scheduler.setup()
-        scheduler.start()
-        return
-
-    pipeline = TradingPipeline(config)
     start = time.monotonic()
     result = None
     error: BaseException | None = None
     try:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = PROJECT_ROOT / config_path
+        if not config_path.exists():
+            logger.error("Config file not found: %s", config_path)
+            
+            
+            
+            
+            sys.exit(f"Config file not found: {config_path}")
+
+        config = load_config(config_path)
+        logger.info("Config loaded. Universe: %s, Paper: %s", config.trading.universe, config.alpaca.paper)
+
+        
+        
+        
+        
+        
+        
+        
+        
+        if not config.alpaca.paper:
+            logger.warning(
+                "LIVE TRADING ENABLED (alpaca.paper=false). Real-money orders "
+                "will be submitted via the Alpaca API key from .env. To revert "
+                "to paper trading, set `alpaca.paper: true` in your config."
+            )
+
+        
+        
+        
+        
+        
+        try:
+            refresh_pricing()
+        except Exception as exc:
+            logger.warning("pricing refresh failed at startup: %s", exc)
+
+        if args.mode == "live":
+            
+            
+            
+            
+            
+            
+            
+            
+            notifier.send("🟢 quantgents live scheduler starting")
+            scheduler = TradingScheduler(config)
+            scheduler.setup()
+            scheduler.start()
+            
+            
+            
+            # type: NoneType" — say what actually happened instead.
+            result = {"status": "scheduler_exited", "run_id": "live"}
+            return
+
+        pipeline = TradingPipeline(config)
         if args.mode == "once" or args.mode == "morning":
             result = pipeline.run_morning()
         elif args.mode == "midday":
@@ -134,9 +160,10 @@ def main():
             result = pipeline.run_earnings_preprocess()
         elif args.mode == "meta":
             result = pipeline.run_quarterly_meta_reflection(force=args.force)
-        elif args.mode == "weekly":
-            result = pipeline.run_weekly()
+        elif args.mode == "daily":
+            result = pipeline.run_daily()
     except BaseException as exc:
+        
         
         
         

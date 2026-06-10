@@ -1,0 +1,17 @@
+# Daily P&L CSV export — pairs with quantgents-daily.timer.
+# Install:
+#   cp scripts/systemd/quantgents-daily.* ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now quantgents-daily.timer
+[Unit]
+Description=quantgents daily P&L CSV export (no LLM, no trading)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/noah/quantgents
+# The runner sources .env and applies its own 300s timeout.
+ExecStart=/home/noah/quantgents/scripts/run_daily_export.sh
+# systemd safety net above the runner's 300+30s kill.
+TimeoutStartSec=420
+StandardOutput=journal
+StandardError=journal
