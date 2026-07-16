@@ -22,7 +22,9 @@ def test_save_then_load_round_trip(tmp_path):
         },
         
         "reasoning_chain": {"volatility_analysis": "…"},
-        "sector_guidance": [{"sector": "Technology", "stance": "overweight"}],
+        "sector_guidance": [
+            {"sector": "Technology", "stance": "overweight", "reason": "AI capex cycle"},
+        ],
     }
     store.save_last_state(analysis)
 
@@ -32,7 +34,14 @@ def test_save_then_load_round_trip(tmp_path):
     assert loaded["position_guidance"]["target_invested_pct"] == 75.0
     
     assert "reasoning_chain" not in loaded
-    assert "sector_guidance" not in loaded
+    
+    
+    
+    
+    
+    
+    assert loaded["sector_guidance"] == {"Technology": "bullish"}
+    assert "reason" not in json.dumps(loaded["sector_guidance"])
     
     assert "date" in loaded
 

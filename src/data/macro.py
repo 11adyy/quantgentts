@@ -225,7 +225,21 @@ class MacroDataProvider:
         if series.empty:
             return {"current_bps": None, "change_30d_bps": None, "staleness_days": None}
         current = float(series.iloc[-1]) * 100  
-        prior_30d = float(series.iloc[0]) * 100 if len(series) >= 2 else current
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        prior_30d = current
+        if len(series) >= 2:
+            cutoff = series.index[-1] - pd.Timedelta(days=30)
+            prior = series[series.index <= cutoff]
+            prior_30d = float(prior.iloc[-1] if not prior.empty else series.iloc[0]) * 100
         return {
             "current_bps": round(current, 1),
             "change_30d_bps": round(current - prior_30d, 1),

@@ -361,6 +361,18 @@ class AgentResult:
     @staticmethod
     def _shape_score(parsed) -> int:
         """How 'agent-output shaped' a JSON candidate looks. Higher is better."""
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        if isinstance(parsed, list):
+            return sum(AgentResult._shape_score(item) for item in parsed)
         if not isinstance(parsed, dict):
             return 0
         keys = set(parsed.keys())

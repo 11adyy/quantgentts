@@ -38,6 +38,14 @@ logger = logging.getLogger(__name__)
 _DB_PATH = Path(__file__).resolve().parent.parent / "data" / "quantgents.db"
 
 
+
+
+
+
+
+_SWEEP_SYMBOLS = frozenset({"SGOV", "BIL"})
+
+
 class TelegramNotifier:
     """Best-effort Telegram Bot API notifier.
 
@@ -562,6 +570,15 @@ def _append_position_snapshot(lines: list[str], total_value: float | None) -> No
         return
     if not rows:
         return
+    
+    
+    
+    
+    
+    
+    parked = sum(r[4] for r in rows
+                 if r[0] in _SWEEP_SYMBOLS and r[4] is not None)
+    rows = [r for r in rows if r[0] not in _SWEEP_SYMBOLS]
     invested = sum(r[4] for r in rows if r[4] is not None)
     cash_pct = None
     if total_value and total_value > 0:
@@ -569,7 +586,11 @@ def _append_position_snapshot(lines: list[str], total_value: float | None) -> No
     summary = f"   Positions: {len(rows)}  invested ${invested:,.0f}"
     if cash_pct is not None:
         summary += f"  ({100 - cash_pct:.0f}% deployed / {cash_pct:.0f}% cash)"
+    if parked > 0:
+        summary += f"  [+${parked:,.0f} parked in T-bills]"
     lines.append(summary)
+    if not rows:
+        return
 
     def _row_line(r: tuple) -> str:
         sym, qty, avg, curr, mv, pnl = r

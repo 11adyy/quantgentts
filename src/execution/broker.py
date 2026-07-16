@@ -23,6 +23,34 @@ _INDEX_ETFS = {"SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "IVV"}
 
 
 
+
+
+
+
+
+
+
+
+
+_ETF_SECTORS = {
+    
+    "XLF": "Financial Services", "XLE": "Energy", "XLV": "Healthcare",
+    "XLI": "Industrials", "XLP": "Consumer Defensive", "XLY": "Consumer Cyclical",
+    "XLU": "Utilities", "XLRE": "Real Estate", "XLB": "Basic Materials",
+    "XLK": "Technology", "XLC": "Communication Services",
+    
+    "SMH": "Technology", "SOXX": "Technology", "DRAM": "Technology",
+    "CHPX": "Technology",
+    
+    
+    
+    "SH": "Broad", "SDS": "Broad", "PSQ": "Broad", "SQQQ": "Broad",
+}
+
+
+
+
+
 _BROKER_HTTP_TIMEOUT = 30.0
 _SECTOR_LOOKUP_TIMEOUT_S = 10  
 
@@ -123,6 +151,14 @@ def _get_sector(symbol: str) -> str:
         with _sector_lock:
             _sector_cache[symbol] = "Broad"
         return "Broad"
+    
+    
+    
+    etf_sector = _ETF_SECTORS.get(symbol.upper())
+    if etf_sector is not None:
+        with _sector_lock:
+            _sector_cache[symbol] = etf_sector
+        return etf_sector
 
     def _fetch():
         try:
@@ -389,10 +425,21 @@ class AlpacaBroker:
         if entry_date is None or entry_close is None:
             return None
         try:
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            if isinstance(entry_close, _dt):
+                return entry_close.replace(tzinfo=ET)
             return _dt.combine(entry_date, entry_close).replace(tzinfo=ET)
         except Exception as exc:
             logger.warning(
-                "get_session_close: failed to combine date=%s close=%s: %s",
+                "get_session_close: failed to resolve date=%s close=%s: %s",
                 entry_date, entry_close, exc,
             )
             return None
@@ -672,13 +719,31 @@ class AlpacaBroker:
                 )
                 failed += 1
         if failed > 0:
+            restored = 0
+            rollback_failed: list[dict] = []
             if cancelled:
-                self._restore_stop_orders(symbol, cancelled)
-            logger.warning(
-                "cancel_snapshotted_stops: %d/%d cancel(s) failed for %s "
-                "(rolled back %d that succeeded); SELL won't proceed",
-                failed, len(specs), symbol, len(cancelled),
-            )
+                
+                
+                
+                
+                
+                
+                restored, rollback_failed = self._restore_stop_orders(symbol, cancelled)
+            if rollback_failed:
+                logger.error(
+                    "cancel_snapshotted_stops: %d/%d cancel(s) failed for %s AND "
+                    "the rollback could not restore %d of %d cancelled stop(s) — "
+                    "%s is now UNDER-PROTECTED; next session's coverage reconcile "
+                    "must repair it. SELL won't proceed.",
+                    failed, len(specs), symbol, len(rollback_failed), len(cancelled),
+                    symbol,
+                )
+            else:
+                logger.warning(
+                    "cancel_snapshotted_stops: %d/%d cancel(s) failed for %s "
+                    "(rolled back %d/%d that succeeded); SELL won't proceed",
+                    failed, len(specs), symbol, restored, len(cancelled),
+                )
             return False
         if cancelled:
             logger.info(
@@ -976,52 +1041,43 @@ class AlpacaBroker:
 
         
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         use_stop = (stop_loss_price is not None and stop_loss_price > 0
                     and order_side == OrderSide.BUY)
 
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        STOP_LIMIT_BUFFER_PCT = 0.03
-        stop_limit_price = None
-        if stop_loss_price is not None and stop_loss_price > 0:
-            stop_limit_price = _quantize_price(stop_loss_price * (1 - STOP_LIMIT_BUFFER_PCT))
-
         if limit_price is not None:
-            kwargs = dict(
+            request = LimitOrderRequest(
                 symbol=symbol, qty=qty, side=order_side,
                 time_in_force=TimeInForce.DAY, limit_price=limit_price,
             )
-            if use_stop:
-                kwargs["order_class"] = OrderClass.OTO
-                kwargs["stop_loss"] = StopLossRequest(
-                    stop_price=stop_loss_price, limit_price=stop_limit_price,
-                )
-            request = LimitOrderRequest(**kwargs)
         else:
-            kwargs = dict(
+            request = MarketOrderRequest(
                 symbol=symbol, qty=qty, side=order_side,
                 time_in_force=TimeInForce.DAY,
             )
-            if use_stop:
-                kwargs["order_class"] = OrderClass.OTO
-                kwargs["stop_loss"] = StopLossRequest(
-                    stop_price=stop_loss_price, limit_price=stop_limit_price,
-                )
-            request = MarketOrderRequest(**kwargs)
 
         order = self.client.submit_order(request)
-        bracket_info = (
-            f" [SL=${stop_loss_price}/limit=${stop_limit_price}]"
-            if use_stop else ""
-        )
+        bracket_info = f" [SL=${stop_loss_price} to be placed on fill]" if use_stop else ""
         logger.info("Order submitted: %s %s %s @ %s%s — status: %s",
                      side, qty, symbol, limit_price or "market", bracket_info,
                      str(getattr(order.status, "value", order.status)))
@@ -1046,7 +1102,74 @@ class AlpacaBroker:
             "qty": qty,
             "limit_price": limit_price,
             "stop_loss_price": stop_loss_price if use_stop else None,
+            
+            
+            "pending_stop_price": stop_loss_price if use_stop else None,
         }
+
+    
+    
+    
+    
+    
+    STOP_LIMIT_BUFFER_PCT = 0.03
+
+    def place_entry_protection(
+        self, symbol: str, order_id: str, stop_price: float,
+        *, requested_qty: float | None = None,
+    ) -> dict | None:
+        """Wait for an entry order to reach terminal, then place a GTC
+        protective stop-limit for the ACTUAL filled qty.
+
+        Returns the stop order dict, or None when nothing was placed (entry
+        didn't fill / didn't converge / stop submit failed). Never raises —
+        a failure here must not abort the session, but it DOES leave the
+        position naked, so it logs at ERROR and relies on the next session's
+        `_reconcile_stop_coverage` auto-repair as the belt.
+        """
+        try:
+            status = self.wait_for_order_terminal(order_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("entry protection: wait failed for %s (%s): %s",
+                           symbol, order_id, exc)
+            status = None
+        try:
+            info = self.get_order_fill_info(order_id) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("entry protection: fill info failed for %s: %s", symbol, exc)
+            info = {}
+        try:
+            filled_qty = float(info.get("filled_qty") or 0)
+        except (TypeError, ValueError):
+            filled_qty = 0.0
+        if filled_qty <= 0:
+            logger.warning(
+                "entry protection: %s entry %s filled 0 (status=%s) — no stop "
+                "placed (nothing to protect)", symbol, order_id, status or "unknown",
+            )
+            return None
+        if requested_qty and filled_qty < requested_qty:
+            logger.warning(
+                "entry protection: %s partially filled %.4f/%.4f — stop sized to "
+                "the ACTUAL fill", symbol, filled_qty, requested_qty,
+            )
+        try:
+            stop_order = self._submit_stop_limit_order(
+                symbol=symbol, qty=filled_qty, stop_price=stop_price,
+                limit_price=stop_price * (1 - self.STOP_LIMIT_BUFFER_PCT),
+            )
+            logger.info(
+                "entry protection: GTC stop-limit placed for %s qty=%.4f @ stop $%.2f",
+                symbol, filled_qty, stop_price,
+            )
+            return stop_order
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "entry protection FAILED for %s (%.4f shares held, stop $%.2f): %s "
+                "— position is UNPROTECTED; next session's coverage reconcile "
+                "must repair it", symbol, filled_qty, stop_price, exc,
+            )
+            return None
 
     def close_position(self, symbol: str) -> dict:
         order = self.client.close_position(symbol)

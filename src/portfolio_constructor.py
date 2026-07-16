@@ -84,7 +84,14 @@ class PortfolioConstructor:
             target_pct = target.target_weight_pct
             delta_pct = target_pct - current_pct
 
-            if abs(delta_pct) < self.cfg.min_trade_weight_delta:
+            
+            
+            
+            
+            
+            
+            closing = (target_pct == 0 and current_pct > 0)
+            if not closing and abs(delta_pct) < self.cfg.min_trade_weight_delta:
                 
                 
                 if current_pct > 0:
@@ -240,7 +247,15 @@ class PortfolioConstructor:
 
         
         
+        
+        
+        
+        
+        
+        
         stop_loss = self._resolve_stop(target, analysis, entry_price)
+        if stop_loss is not None:
+            stop_loss = round(stop_loss, 2)
         if stop_loss is None or stop_loss <= 0 or stop_loss >= entry_price:
             logger.warning(
                 "Constructor: BUY %s rejected — no valid stop below entry "
@@ -257,7 +272,22 @@ class PortfolioConstructor:
             stop_gap_pct = (entry_price - stop_loss) / entry_price
             take_profit = round(entry_price * (1 + 2 * stop_gap_pct), 2)
 
-        allocation_pct = target_pct - current_pct
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        from src.risk.rules import _gross_multiplier
+        allocation_pct = (target_pct - current_pct) / _gross_multiplier(target.symbol)
+        
+        
         
         
         risk_per_share = entry_price - stop_loss
@@ -294,7 +324,7 @@ class PortfolioConstructor:
             symbol=target.symbol,
             allocation_pct=allocation_pct,
             entry_price=entry_price,
-            stop_loss=round(stop_loss, 2),
+            stop_loss=stop_loss,   
             take_profit=take_profit,
             reasoning=reasoning[:500],
         )

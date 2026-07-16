@@ -622,12 +622,38 @@ class EarningsDataProvider:
             )
             return self._get_existing_analysis(symbol, form_type=latest.form_type)
 
-        if last_known == latest.filing_date:
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        try:
+            prior_failures = int(entry.get("failed_attempts", 0) or 0)
+        except (TypeError, ValueError):
+            prior_failures = 0
+        if last_known == latest.filing_date and not prior_failures:
             
             existing = self._get_existing_analysis(symbol, form_type=latest.form_type)
             if existing:
                 return existing
             
+        elif last_known == latest.filing_date and prior_failures:
+            logger.info(
+                "%s %s (%s): retrying after %d failed analysis attempt(s)",
+                symbol, latest.form_type, latest.filing_date, prior_failures,
+            )
 
         
         local_path = self._download_filing(cik, latest)

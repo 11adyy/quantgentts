@@ -577,8 +577,14 @@ class RiskStage:
                 len(portfolio_decision.decisions),
             )
 
+        
+        
+        
+        
+        
         portfolio_decision.decisions = pipeline._clamp_queued_earnings_buys(
             portfolio_decision.decisions, earnings_results,
+            positions=rm_positions, total_value=total_value,
         )
 
         daily_pnl = total_value - last_equity
@@ -879,12 +885,22 @@ class ExecutionStage:
         
         if buy_decisions:
             if not sell_decisions:
-                account, positions, _ = pipeline._refresh_account_state()
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                account, positions, fresh_prices = pipeline._refresh_account_state()
                 cash = account["cash"]
                 total_value = account["portfolio_value"]
                 ctx.positions = positions
                 ctx.cash = cash
                 ctx.total_value = total_value
+                price_map = {**price_map, **fresh_prices}
             daily_pnl_now = total_value - ctx.last_equity
             loss_violation_now = pipeline.risk_engine.check_daily_loss(
                 ctx.last_equity, daily_pnl_now,
@@ -927,6 +943,7 @@ class ExecutionStage:
                     total_value = ctx.total_value
 
         available_cash = cash
+        pending_entry_stops: list[dict] = []
         for decision in buy_decisions:
             if decision.action != "BUY":
                 continue
@@ -1136,8 +1153,37 @@ class ExecutionStage:
                     "Executed: buy %d %s @ %s $%.2f",
                     qty, decision.symbol, order_type, executed_price,
                 )
+                
+                
+                
+                
+                
+                
+                if isinstance(order, dict) and order.get("pending_stop_price"):
+                    pending_entry_stops.append({
+                        "symbol": decision.symbol,
+                        "order_id": order.get("id"),
+                        "stop_price": order["pending_stop_price"],
+                        "qty": qty,
+                    })
             except Exception as e:
                 logger.error("Order failed for %s %s: %s", decision.action, decision.symbol, e)
+
+        
+        for spec in pending_entry_stops:
+            if not spec.get("order_id"):
+                continue
+            try:
+                pipeline.broker.place_entry_protection(
+                    symbol=spec["symbol"], order_id=spec["order_id"],
+                    stop_price=spec["stop_price"], requested_qty=spec["qty"],
+                )
+            except Exception as e:  # noqa: BLE001 — never abort the session here
+                logger.error(
+                    "entry protection raised for %s: %s — position may be "
+                    "unprotected until the next coverage reconcile",
+                    spec["symbol"], e,
+                )
 
         ctx.orders = orders
         return orders

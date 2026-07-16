@@ -8,6 +8,31 @@ from src.util.time import ET, UTC, et_today
 logger = logging.getLogger(__name__)
 
 
+def _is_filled_trail_stop(row, action: str) -> bool:
+    """True for a TRAIL_STOP row the broker actually EXECUTED.
+
+    A TRAIL_STOP row is written fill_status='submitted' at placement and only
+    flipped to 'filled' by _reconcile_fills when the broker reports a fill, so
+    the status is what distinguishes "protection sitting there" from "the stop
+    sold our shares". Mirrors the same distinction in
+    pipeline._build_post_exit_reality. Legacy rows can carry a NULL
+    fill_status; those only count when a real fill_qty was recorded, so a
+    never-filled stop can't book a phantom exit at its stop price.
+    """
+    if action != "TRAIL_STOP":
+        return False
+    try:
+        status = (row["fill_status"] or "").lower()
+    except (KeyError, IndexError, TypeError):
+        status = ""
+    if status == "filled":
+        return True
+    try:
+        return status == "" and float(row["fill_qty"] or 0) > 0
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+
+
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -1104,7 +1129,8 @@ class Database:
             
             
             rows = self.conn.execute(
-                "SELECT symbol, action, qty, price, timestamp, fill_qty, fill_price "
+                "SELECT symbol, action, qty, price, timestamp, fill_qty, "
+                "fill_price, fill_status "
                 "FROM trades WHERE timestamp > datetime('now', ?) "
                 f"AND {self._executed_trade_predicate()} "
                 "ORDER BY timestamp",
@@ -1127,7 +1153,19 @@ class Database:
                 open_lots[sym].append({"qty": qty, "price": price, "ts": ts})
             elif (act.startswith("SELL") or act.startswith("PARTIAL_SELL")
                   or act in ("EMERGENCY_SELL", "FORCE_DELEVER",
-                             "REDUCE", "TAKE_PROFIT")):
+                             "REDUCE", "TAKE_PROFIT")
+                  or _is_filled_trail_stop(row, act)):
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
                 
                 remaining = qty
                 lots = open_lots[sym]

@@ -92,6 +92,27 @@ class RiskRuleEngine:
             )
             baseline = total_value
 
+        
+        
+        
+        
+        
+        
+        
+        bad_mv = [p.symbol for p in positions if not math.isfinite(p.market_value)]
+        if bad_mv:
+            return [RiskViolation(
+                rule="max_total_position_pct",   
+                message=(
+                    f"non-finite market_value for {', '.join(sorted(bad_mv))} — "
+                    f"exposure / sector caps cannot be computed; refusing to "
+                    f"risk-check BUY for {decision.symbol}; blocking until the "
+                    f"next clean snapshot"
+                ),
+                value=0.0,
+                limit=0.0,
+            )]
+
         violations = []
         signed_mul = _effective_multiplier(decision.symbol)  
         gross_mul = _gross_multiplier(decision.symbol)       
@@ -170,9 +191,18 @@ class RiskRuleEngine:
                 
                 
                 
+                
+                
+                
+                
+                
+                
+                
+                
+                cluster_symbols = set(peers) | {decision.symbol}
                 peer_value = sum(
                     p.market_value * _gross_multiplier(p.symbol)
-                    for p in positions if p.symbol in peers
+                    for p in positions if p.symbol in cluster_symbols
                 )
                 cluster_pct = (peer_value + gross_new) / total_value * 100
                 if cluster_pct > max_correlated_cluster_pct:

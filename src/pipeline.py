@@ -834,21 +834,92 @@ class TradingPipeline:
                 continue
             covered = sum(float(s.get("qty", 0) or 0) for s in (specs or []))
             if covered + 1e-6 < qty:
-                gaps.append({
-                    "symbol": symbol, "held_qty": qty, "covered_qty": covered,
-                })
+                gap = {"symbol": symbol, "held_qty": qty, "covered_qty": covered}
                 logger.warning(
                     "STOP-COVERAGE GAP: %s held=%.4f but only %.4f covered by "
                     "open protective stops — (partially) unprotected with no WAL "
-                    "recovery row. Manual review / re-protect needed.",
-                    symbol, qty, covered,
+                    "recovery row.", symbol, qty, covered,
                 )
+                gap["repaired"] = self._repair_stop_coverage(symbol, qty - covered)
+                gaps.append(gap)
         if longs_checked and not gaps:
             logger.info(
                 "Stop-coverage reconcile: all %d long position(s) adequately "
                 "stop-covered", longs_checked,
             )
         return gaps
+
+    def _repair_stop_coverage(self, symbol: str, uncovered_qty: float) -> bool:
+        """Best-effort: re-place a GTC protective stop on an uncovered long
+        using the stop level recorded on its last BUY. Returns True when a
+        stop was actually submitted.
+
+        Why this is now safe to auto-repair (it deliberately wasn't before):
+        the old objection was "the original protective level is unknown for a
+        position with no live stop, so picking one is a policy decision". It
+        isn't unknown — the BUY row carries the `stop_loss` the PM/RM agreed
+        and the constructor sized against. Repairing to THAT level restores the
+        reviewed intent rather than inventing a new one.
+
+        This is the belt for the 2026-07-16 CRITICAL (BUY-attached OTO stops
+        inherited a DAY tif and expired at the close, leaving positions naked
+        overnight) — both for any position that bug left uncovered, and for a
+        crash between an entry fill and `place_entry_protection`.
+
+        Guards: never place a stop at/above the current price (that would
+        instantly fire and turn a repair into a market-order exit — a decision
+        for the reviewer, not for a janitor), and never invent a level when the
+        BUY row has none.
+        """
+        if uncovered_qty <= 0:
+            return False
+        try:
+            buy = self.db.get_symbol_last_buy(symbol) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("coverage repair: last-BUY lookup failed for %s: %s", symbol, exc)
+            return False
+        try:
+            stop_price = float(buy.get("stop_loss") or 0)
+        except (TypeError, ValueError):
+            stop_price = 0.0
+        if stop_price <= 0:
+            logger.warning(
+                "coverage repair: %s has no recorded BUY stop_loss — leaving the "
+                "gap flagged for manual review", symbol,
+            )
+            return False
+        try:
+            price = self.broker.get_latest_price(symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("coverage repair: price lookup failed for %s: %s", symbol, exc)
+            return False
+        if not (isinstance(price, (int, float)) and price > 0 and math.isfinite(price)):
+            return False
+        if stop_price >= price:
+            logger.warning(
+                "coverage repair: %s recorded stop $%.2f is at/above the live "
+                "price $%.2f — a repair would fire immediately. Leaving the gap "
+                "flagged; the reviewer owns this exit decision.",
+                symbol, stop_price, price,
+            )
+            return False
+        try:
+            self.broker._submit_stop_limit_order(
+                symbol=symbol, qty=uncovered_qty, stop_price=stop_price,
+                limit_price=stop_price * (1 - self.broker.STOP_LIMIT_BUFFER_PCT),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "coverage repair FAILED for %s (%.4f uncovered, stop $%.2f): %s",
+                symbol, uncovered_qty, stop_price, exc,
+            )
+            return False
+        logger.warning(
+            "COVERAGE REPAIRED: %s — placed GTC stop-limit for %.4f uncovered "
+            "share(s) at the recorded BUY stop $%.2f",
+            symbol, uncovered_qty, stop_price,
+        )
+        return True
 
     def _submit_protected_sell(
         self,
@@ -1256,9 +1327,21 @@ class TradingPipeline:
             
             
             
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
             if not from_drain:
                 self._persist_orphaned_protection_restore(
-                    order_id, symbol, actual_residual, cancelled_specs,
+                    order_id, symbol, position_qty_before_sell, cancelled_specs,
                     wal_row_id=wal_row_id,
                 )
             return False, list(cancelled_specs)
@@ -1774,13 +1857,25 @@ class TradingPipeline:
         decisions: list[TradeDecision],
         earnings_results: list[dict],
         max_pct: float = 5.0,
+        positions: list | None = None,
+        total_value: float | None = None,
     ) -> list[TradeDecision]:
-        """Hard-cap BUY allocation on symbols with queued (just-filed) earnings.
+        """Hard-cap the RESULTING position weight on symbols with queued
+        (just-filed) earnings.
 
         A 10-Q filed today but not yet analyzed by the LLM can move the stock
         ±10% overnight. PM shouldn't size up before the analyst has read it.
-        Prompt rule asks PM to self-comply; this is the belt that keeps things
-        safe even if the LLM ignores the rule.
+        The prompt rule asks PM to self-comply ("cap at target_weight_pct <=
+        5.0"); this is the belt that holds when the LLM ignores it.
+
+        2026-07-16 audit: the belt capped the wrong number. By this point in
+        the pipeline `allocation_pct` is the constructor's DELTA (target minus
+        current weight), not the target — so a name already held at 15% with
+        an unread filing could be topped up to 20% because the ADD itself was
+        <= 5%. The cap now measures what it documents: existing weight + add.
+        `positions`/`total_value` are optional so the old delta-only behavior
+        remains for callers that can't supply a book (tests, and any future
+        caller with no position context) rather than crashing.
         """
         queued_symbols = {
             (ea.get("symbol") or "").strip().upper()
@@ -1790,20 +1885,49 @@ class TradingPipeline:
         queued_symbols.discard("")
         if not queued_symbols:
             return decisions
+
+        
+        current: dict[str, float] = {}
+        if positions and total_value and total_value > 0:
+            try:
+                from src.portfolio_constructor import PortfolioConstructor
+                current = PortfolioConstructor._current_weights(positions, total_value)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Earnings-queued cap: weight lookup failed (%s) — "
+                               "falling back to delta-only capping", e)
+                current = {}
+
         clamped: list[TradeDecision] = []
         for d in decisions:
-            if d.action == "BUY" and d.symbol.upper() in queued_symbols and d.allocation_pct > max_pct:
-                try:
-                    reduced = d.model_copy(update={"allocation_pct": max_pct})
-                    logger.warning(
-                        "Earnings-queued cap: %s BUY %.2f%% → %.2f%% (fresh filing not yet analyzed)",
-                        d.symbol, d.allocation_pct, max_pct,
-                    )
-                    clamped.append(reduced)
-                except Exception as e:
-                    logger.warning("Earnings-queued cap copy failed for %s: %s — keeping original", d.symbol, e)
-                    clamped.append(d)
-            else:
+            if d.action != "BUY" or d.symbol.upper() not in queued_symbols:
+                clamped.append(d)
+                continue
+            from src.risk.rules import _gross_multiplier
+            held_pct = current.get(d.symbol.upper(), 0.0)
+            
+            
+            allowed_raw = max(0.0, max_pct - held_pct) / _gross_multiplier(d.symbol)
+            if d.allocation_pct <= allowed_raw:
+                clamped.append(d)
+                continue
+            if allowed_raw <= 0:
+                logger.warning(
+                    "Earnings-queued cap: DROPPING %s BUY %.2f%% — already at "
+                    "%.1f%% weight, at/over the %.1f%% cap with a fresh filing "
+                    "not yet analyzed",
+                    d.symbol, d.allocation_pct, held_pct, max_pct,
+                )
+                continue   
+            try:
+                reduced = d.model_copy(update={"allocation_pct": round(allowed_raw, 2)})
+                logger.warning(
+                    "Earnings-queued cap: %s BUY %.2f%% → %.2f%% (held %.1f%%, "
+                    "cap %.1f%%; fresh filing not yet analyzed)",
+                    d.symbol, d.allocation_pct, allowed_raw, held_pct, max_pct,
+                )
+                clamped.append(reduced)
+            except Exception as e:
+                logger.warning("Earnings-queued cap copy failed for %s: %s — keeping original", d.symbol, e)
                 clamped.append(d)
         return clamped
 
@@ -2116,7 +2240,24 @@ class TradingPipeline:
         """
         from datetime import timedelta as _td
         orders: list[dict] = []
-        tomorrow = et_today() + _td(days=1)
+        today = et_today()
+        
+        
+        
+        
+        
+        
+        next_trading_day = today + _td(days=1)
+        for _ in range(7):
+            try:
+                if self.broker.is_trading_day(next_trading_day):
+                    break
+            except Exception as e:  # noqa: BLE001
+                logger.warning("ex-div: is_trading_day failed (%s) — falling back "
+                               "to calendar+1", e)
+                next_trading_day = today + _td(days=1)
+                break
+            next_trading_day += _td(days=1)
 
         for p in positions:
             if p.qty <= 0:
@@ -2144,7 +2285,9 @@ class TradingPipeline:
                 continue
             if not div:
                 continue
-            if div.get("date") != tomorrow:
+            div_date = div.get("date")
+            if not (div_date and today < div_date <= next_trading_day):
+                
                 
                 
                 
@@ -2962,14 +3105,35 @@ class TradingPipeline:
             return v
 
         rows_in_window = rows[:lookback_days]  
+        
+        
+        
+        
+        
+        
+        
+        
+        seen_sells: set[tuple] = set()
         for row in rows_in_window:
             for g in _load("sell_grades_json", row):
                 if not isinstance(g, dict):
                     continue
+                sym = g.get("symbol")
+                sell_date = g.get("sell_date")
+                
+                
+                
+                
+                
+                
+                if sym and sell_date:
+                    key = (sym, sell_date)
+                    if key in seen_sells:
+                        continue
+                    seen_sells.add(key)
                 grade = g.get("grade")
                 if grade in sell_counts:
                     sell_counts[grade] += 1
-                sym = g.get("symbol")
                 if sym and grade == "premature":
                     sell_premature_by_symbol[sym] = sell_premature_by_symbol.get(sym, 0) + 1
                 if sym and grade == "wrong":
@@ -4652,10 +4816,13 @@ class TradingPipeline:
         EMERGENCY_SELL / FORCE_DELEVER. TRAIL_STOP and HOLD do NOT count
         (TRAIL_STOP is stop adjustment, HOLD is no-op).
 
-        Filters out canceled / rejected / expired fills — if a SELL was
-        submitted earlier and broker rejected, the symbol is fair game for
-        re-trying. Pending (`submitted`) and `filled` rows both block, so
-        we never double-submit on the same symbol within one day.
+        Filters out canceled / rejected / expired orders that filled ZERO
+        shares — if a SELL was submitted earlier and the broker rejected it,
+        the symbol is fair game for re-trying. A PARTIAL fill still blocks:
+        those shares left the book, so a second trim today would be the
+        double-application this guard exists to prevent. Pending (`submitted`)
+        and `filled` rows both block, so we never double-submit on the same
+        symbol within one day.
         """
         try:
             rows = self.db.get_trades(today_only=True, limit=200)
@@ -4668,7 +4835,6 @@ class TradingPipeline:
             "REDUCE", "SELL", "TAKE_PROFIT",
             "EMERGENCY_SELL", "FORCE_DELEVER",
         }
-        bad_status = {"canceled", "cancelled", "rejected", "expired", "done_for_day"}
         out: set[str] = set()
         for r in rows:
             action = (r.get("action") or "").upper()
@@ -4676,8 +4842,16 @@ class TradingPipeline:
             base_action = action.split("(", 1)[0].strip()
             if base_action not in sell_actions and base_action != "PARTIAL_SELL":
                 continue
-            status = (r.get("fill_status") or "").lower()
-            if status in bad_status:
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            if not self._trade_executed_or_pending(r):
                 continue
             sym = r.get("symbol")
             if sym:
@@ -5046,6 +5220,23 @@ class TradingPipeline:
             order, prot = sale
             pending_protections.append(prot)
             try:
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                projected_proceeds += p.market_value * 0.99
+                orders.append(order)
+                logger.info(
+                    "FORCE DE-LEVER SELL %s qty=%s @ limit=$%.2f "
+                    "(unrealized_pnl=$%.2f, mkt_value=$%.2f)",
+                    p.symbol, self._format_qty(qty), sell_limit,
+                    p.unrealized_pnl, p.market_value,
+                )
                 self.db.insert_trade(
                     symbol=p.symbol, action="FORCE_DELEVER", qty=qty,
                     price=p.current_price,
@@ -5058,17 +5249,12 @@ class TradingPipeline:
                     broker_order_id=order.get("id"),
                     fill_status="submitted",
                 )
-                orders.append(order)
-                
-                projected_proceeds += p.market_value * 0.99
-                logger.info(
-                    "FORCE DE-LEVER SELL %s qty=%s @ limit=$%.2f "
-                    "(unrealized_pnl=$%.2f, mkt_value=$%.2f)",
-                    p.symbol, self._format_qty(qty), sell_limit,
-                    p.unrealized_pnl, p.market_value,
-                )
             except Exception as e:
-                logger.error("FORCE DE-LEVER SELL %s failed: %s", p.symbol, e)
+                logger.error(
+                    "FORCE DE-LEVER SELL %s failed: %s — the order may still be "
+                    "live at the broker; its proceeds are already counted so the "
+                    "sweep will not over-liquidate", p.symbol, e,
+                )
 
         
         
@@ -5669,9 +5855,20 @@ class TradingPipeline:
         
         
         review_positions = positions
+        review_cash = cash
         sweeper = self._sweeper()
         if sweeper is not None:
-            review_positions, _parked = sweeper.split_positions(positions)
+            review_positions, parked = sweeper.split_positions(positions)
+            
+            
+            
+            
+            
+            
+            if parked is not None:
+                mv = parked.market_value
+                if isinstance(mv, (int, float)) and math.isfinite(mv) and mv > 0:
+                    review_cash = cash + mv
 
         if review_positions:
             
@@ -5728,7 +5925,7 @@ class TradingPipeline:
             review, md_result = self.position_reviewer.review(
                 positions=review_positions,
                 macro_summary=macro_summary,
-                cash_balance=cash,
+                cash_balance=review_cash,
                 total_value=total_value,
                 session_type=session_type,
                 position_facts=position_facts,
