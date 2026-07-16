@@ -384,6 +384,23 @@ class DecisionStage:
         cash = ctx.cash
         last_equity = ctx.last_equity
 
+        
+        
+        
+        
+        
+        
+        from src.execution.cash_sweep import CashSweeper
+        sweeper = getattr(pipeline, "_sweeper", None)
+        sweeper = sweeper() if callable(sweeper) else None
+        if isinstance(sweeper, CashSweeper):
+            positions, parked = sweeper.split_positions(positions)
+            if parked is not None:
+                import math as _math
+                mv = parked.market_value
+                if isinstance(mv, (int, float)) and _math.isfinite(mv) and mv > 0:
+                    cash = cash + mv
+
         yesterday_insights = pipeline.db.get_latest_insights(before_date=session_date_key())
         recent_performance = pipeline._compute_recent_performance(last_equity)
         if yesterday_insights:
@@ -413,6 +430,7 @@ class DecisionStage:
             positions=positions, analyses=analyses,
             total_value=total_value, cash=cash,
             recent_performance=recent_performance,
+            macro_analysis=macro_analysis,
         )
         ctx.facts = pm_facts
 
@@ -531,6 +549,21 @@ class RiskStage:
         data_status = ctx.data_status
 
         
+        
+        
+        
+        
+        
+        
+        
+        from src.execution.cash_sweep import CashSweeper
+        sweeper = getattr(pipeline, "_sweeper", None)
+        sweeper = sweeper() if callable(sweeper) else None
+        rm_positions = positions
+        if isinstance(sweeper, CashSweeper):
+            rm_positions, _parked = sweeper.split_positions(positions)
+
+        
         portfolio_decision.decisions, symbol_blocked_reasons = pipeline._filter_supported_symbols(
             portfolio_decision.decisions, analyses, positions,
         )
@@ -559,7 +592,7 @@ class RiskStage:
         try:
             from src.data.correlation import build_correlation_matrix
             pool_bars = dict(ctx.symbols_bars)
-            for p in positions:
+            for p in rm_positions:
                 if p.symbol not in pool_bars:
                     pool_bars[p.symbol] = pipeline.market.get_ohlcv(
                         p.symbol, pipeline.config.trading.lookback_days,
@@ -604,7 +637,7 @@ class RiskStage:
             ))
             logger.warning("Morning data degradation: %s", data_status)
 
-        has_book_to_check = len(positions) >= 2 or any(
+        has_book_to_check = len(rm_positions) >= 2 or any(
             d.action == "BUY" for d in portfolio_decision.decisions
         )
         if (not correlation_matrix) and has_book_to_check:
@@ -629,7 +662,7 @@ class RiskStage:
 
         verdict, rm_result = pipeline.risk_manager.review(
             portfolio_decision=portfolio_decision,
-            positions=positions,
+            positions=rm_positions,
             macro_summary=ctx.macro_summary,
             rule_violations=rule_violations,
             tech_analyses=analyses,
@@ -864,6 +897,35 @@ class ExecutionStage:
                 )
                 buy_decisions = []
 
+        
+        
+        
+        
+        
+        
+        if buy_decisions:
+            from src.execution.cash_sweep import CashSweeper
+            sweeper = getattr(pipeline, "_sweeper", None)
+            sweeper = sweeper() if callable(sweeper) else None
+            if not isinstance(sweeper, CashSweeper):
+                sweeper = None
+            if sweeper is not None:
+                planned_notional = sum(
+                    total_value * d.allocation_pct / 100.0
+                    for d in buy_decisions
+                    if d.allocation_pct > 0
+                )
+                try:
+                    freed = sweeper.fund_buys(ctx, planned_notional)
+                except Exception as e:
+                    logger.warning("cash sweep: fund_buys failed (BUYs will "
+                                   "use raw cash only): %s", e)
+                    freed = 0.0
+                if freed > 0:
+                    positions = ctx.positions
+                    cash = ctx.cash
+                    total_value = ctx.total_value
+
         available_cash = cash
         for decision in buy_decisions:
             if decision.action != "BUY":
@@ -930,11 +992,60 @@ class ExecutionStage:
                     )
                     continue
 
+                
+                
+                
+                
+                
+                
+                
+                
+                stop_price = decision.stop_loss
+                if stop_price > 0 and sizing_price > stop_price:
+                    try:
+                        bars = ctx.symbols_bars.get(decision.symbol) or []
+                        atr14 = None
+                        if len(bars) >= 15:
+                            from src.data.technical import compute_indicators
+                            atr14 = compute_indicators(decision.symbol, bars).atr_14
+                        if atr14 and atr14 > 0 and (sizing_price - stop_price) < atr14:
+                            widened = round(sizing_price - atr14, 2)
+                            logger.warning(
+                                "BUY %s: stop $%.2f is %.2f×ATR from entry "
+                                "$%.2f — widening to $%.2f (1×ATR14=$%.2f "
+                                "floor; qty sizing compensates)",
+                                decision.symbol, stop_price,
+                                (sizing_price - stop_price) / atr14,
+                                sizing_price, widened, atr14,
+                            )
+                            stop_price = widened
+                            
+                            
+                            
+                            
+                            
+                            
+                            if decision.take_profit > 0:
+                                reward = decision.take_profit - sizing_price
+                                risk = sizing_price - stop_price
+                                if risk > 0 and reward / risk < 1.2:
+                                    logger.warning(
+                                        "BUY %s skipped: ATR-widened stop "
+                                        "makes R/R %.2f (<1.2) — RM approved "
+                                        "a tighter-stop geometry that daily "
+                                        "noise would have destroyed.",
+                                        decision.symbol, reward / risk,
+                                    )
+                                    continue
+                    except Exception as e:
+                        logger.warning("ATR stop floor skipped for %s: %s",
+                                       decision.symbol, e)
+
                 qty_by_alloc = int((total_value * decision.allocation_pct / 100) / sizing_price)
                 qty_by_risk = None
                 RISK_BUDGET_PCT = 0.5
-                if decision.stop_loss > 0 and sizing_price > decision.stop_loss:
-                    risk_per_share = sizing_price - decision.stop_loss
+                if stop_price > 0 and sizing_price > stop_price:
+                    risk_per_share = sizing_price - stop_price
                     if risk_per_share > 0:
                         risk_dollars = total_value * RISK_BUDGET_PCT / 100
                         qty_by_risk = int(risk_dollars / risk_per_share)
@@ -943,7 +1054,7 @@ class ExecutionStage:
                         "Vol-adjusted sizing for %s: qty_by_alloc=%d → qty_by_risk=%d "
                         "(risk %.2f/share, budget $%.0f = %.1f%% of equity)",
                         decision.symbol, qty_by_alloc, qty_by_risk,
-                        sizing_price - decision.stop_loss,
+                        sizing_price - stop_price,
                         total_value * RISK_BUDGET_PCT / 100, RISK_BUDGET_PCT,
                     )
                     qty = qty_by_risk
@@ -976,7 +1087,7 @@ class ExecutionStage:
                 pending_row_id = pipeline.db.insert_trade(
                     symbol=decision.symbol, action="BUY", qty=qty,
                     price=executed_price, reasoning=decision.reasoning, run_id=run_id,
-                    stop_loss=decision.stop_loss, take_profit=decision.take_profit,
+                    stop_loss=stop_price, take_profit=decision.take_profit,
                     broker_order_id=None,
                     fill_status="pending_submit",
                 )
@@ -985,7 +1096,7 @@ class ExecutionStage:
                     order = pipeline.broker.submit_order(
                         symbol=decision.symbol, qty=qty, side="buy",
                         limit_price=limit_price,
-                        stop_loss_price=decision.stop_loss if decision.stop_loss > 0 else None,
+                        stop_loss_price=stop_price if stop_price > 0 else None,
                         reference_price=market_price,
                     )
                 except Exception:

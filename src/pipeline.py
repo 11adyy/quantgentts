@@ -348,6 +348,27 @@ class TradingPipeline:
         self.decision_stage = DecisionStage(pipeline=self)
         self.risk_stage = RiskStage(pipeline=self)
         self.execution_stage = ExecutionStage(pipeline=self)
+        
+        
+        
+        from src.execution.cash_sweep import CashSweeper
+        self.cash_sweeper = CashSweeper(pipeline=self)
+
+    def _sweeper(self):
+        """The cash sweeper, or None when absent/disabled.
+
+        getattr-guarded because ~58 tests build TradingPipeline via
+        __new__() without __init__ — for them (and for enabled=False
+        configs) every sweep hook must be a structural no-op.
+        """
+        from src.execution.cash_sweep import CashSweeper
+        sweeper = getattr(self, "cash_sweeper", None)
+        if not isinstance(sweeper, CashSweeper):
+            return None
+        try:
+            return sweeper if sweeper.enabled() else None
+        except Exception:  # noqa: BLE001 — a broken config must not take down a session
+            return None
 
     @staticmethod
     def _format_qty(qty: float) -> str:
@@ -442,6 +463,19 @@ class TradingPipeline:
         pending_sector_investment: dict[str, float] = {}
         pending_symbol_investment: dict[str, float] = {}
         pending_cash_outflow = 0.0
+
+        
+        
+        
+        
+        
+        sweeper = self._sweeper()
+        if sweeper is not None:
+            positions, parked = sweeper.split_positions(positions)
+            if parked is not None and cash is not None:
+                mv = parked.market_value
+                if isinstance(mv, (int, float)) and math.isfinite(mv) and mv > 0:
+                    cash = cash + mv
 
         
         
@@ -555,12 +589,26 @@ class TradingPipeline:
             projected_invested_pct = abs(existing_net + pending_investment) / total_value * 100
             deviation = projected_invested_pct - macro_target_invested_pct
             if abs(deviation) > 15:
+                
+                
+                
+                
+                
+                if deviation < 0:
+                    guidance = (
+                        "advisory — book is UNDER macro's target; do NOT "
+                        "scale down the remaining BUYs for this reason. If "
+                        "cutting anything, name a risk specific to the trade, "
+                        "not the gap."
+                    )
+                else:
+                    guidance = "advisory — RM should consider scale_all_buys"
                 remaining_violations.append(RiskViolation(
                     rule="macro_exposure_deviation",
                     message=(
                         f"Projected net exposure {projected_invested_pct:.0f}% deviates "
                         f"from Macro target {macro_target_invested_pct:.0f}% by {deviation:+.0f}pp "
-                        f"(advisory — RM should consider scale_all_buys)"
+                        f"({guidance})"
                     ),
                     value=projected_invested_pct,
                     limit=macro_target_invested_pct,
@@ -759,6 +807,8 @@ class TradingPipeline:
 
         gaps: list[dict] = []
         longs_checked = 0
+        sweeper = self._sweeper()
+        sweep_symbol = sweeper.symbol if sweeper is not None else None
         for p in positions:
             symbol = getattr(p, "symbol", None)
             try:
@@ -768,6 +818,11 @@ class TradingPipeline:
             
             
             if not symbol or qty <= 0 or symbol in pending_syms:
+                continue
+            
+            
+            
+            if sweep_symbol is not None and symbol == sweep_symbol:
                 continue
             longs_checked += 1
             try:
@@ -2852,13 +2907,26 @@ class TradingPipeline:
             "repeat_premature_symbols": [],
             "repeat_wrong_symbols": [],
         }
+        def _with_reality(base: dict) -> dict:
+            
+            
+            
+            try:
+                base["post_exit_reality"] = self._build_post_exit_reality(
+                    lookback_days=max(lookback_days, 14),
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("post_exit_reality failed (summary degrades): %s", e)
+                base["post_exit_reality"] = None
+            return base
+
         try:
             rows = self.db.get_recent_insights(limit=lookback_days + 5)
         except Exception as e:
             logger.warning("trade_grade_summary: insights fetch failed: %s", e)
-            return empty
+            return _with_reality(empty)
         if not rows:
-            return empty
+            return _with_reality(empty)
 
         sell_counts = {"correct": 0, "premature": 0, "wrong": 0}
         buy_counts = {"correct": 0, "premature": 0, "wrong": 0}
@@ -2913,7 +2981,7 @@ class TradingPipeline:
                 if grade in buy_counts:
                     buy_counts[grade] += 1
 
-        return {
+        summary = {
             "n_sells": sum(sell_counts.values()),
             "n_buys": sum(buy_counts.values()),
             "sell_counts": sell_counts,
@@ -2924,6 +2992,108 @@ class TradingPipeline:
             "repeat_wrong_symbols": sorted(
                 s for s, c in sell_wrong_by_symbol.items() if c >= 2
             ),
+        }
+        
+        
+        
+        
+        
+        return _with_reality(summary)
+
+    
+    
+    _EXIT_AUDIT_ACTIONS = (
+        "SELL", "REDUCE", "EMERGENCY_SELL", "FORCE_DELEVER", "TAKE_PROFIT",
+    )
+
+    def _build_post_exit_reality(
+        self, lookback_days: int = 14, min_age_days: int = 2, max_symbols: int = 12,
+    ) -> dict | None:
+        """What actually happened after our recent exits — from the tape.
+
+        For every realized exit in the window (SELL family + filled
+        TRAIL_STOPs) at least `min_age_days` old, compare the exit price to
+        the live price. Returns None when there's nothing to audit.
+
+        {"n": int, "n_higher_5pct": int, "avg_move_pct": float,
+         "worst": [{"symbol", "date", "move_pct"} × ≤3]}   # worst = ran most
+        """
+        from datetime import datetime as _dt, timedelta, timezone
+        try:
+            rows = self.db.get_trades(limit=120)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("post_exit_reality: trades fetch failed: %s", e)
+            return None
+        now = _dt.now(timezone.utc)
+        window_start = now - timedelta(days=lookback_days)
+        age_cutoff = now - timedelta(days=min_age_days)
+        sweeper = self._sweeper()
+        sweep_symbol = sweeper.symbol if sweeper is not None else None
+        exits: list[dict] = []
+        for row in rows:
+            action = (row.get("action") or "").upper()
+            
+            
+            
+            if sweep_symbol is not None and (row.get("symbol") or "") == sweep_symbol:
+                continue
+            is_exit = (
+                action in self._EXIT_AUDIT_ACTIONS
+                or action.startswith("PARTIAL_SELL")
+                or (action == "TRAIL_STOP"
+                    and (row.get("fill_status") or "") == "filled")
+            )
+            if not is_exit:
+                continue
+            if action != "TRAIL_STOP" and (row.get("fill_status") or "") not in (
+                "filled", "submitted",
+            ):
+                continue
+            ts = row.get("timestamp") or ""
+            try:
+                dt = _dt.fromisoformat(ts.replace("Z", "+00:00")) if "T" in ts \
+                    else _dt.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if not (window_start <= dt <= age_cutoff):
+                continue
+            exit_px = row.get("fill_price") or row.get("price")
+            if not (isinstance(exit_px, (int, float)) and exit_px > 0):
+                continue
+            exits.append({
+                "symbol": row.get("symbol"), "date": ts[:10],
+                "exit_px": float(exit_px),
+            })
+        if not exits:
+            return None
+        
+        prices: dict[str, float] = {}
+        for sym in list(dict.fromkeys(e["symbol"] for e in exits))[:max_symbols]:
+            try:
+                px = self.broker.get_latest_price(sym)
+            except Exception:  # noqa: BLE001
+                px = None
+            if isinstance(px, (int, float)) and px > 0:
+                prices[sym] = float(px)
+        moves: list[dict] = []
+        for e in exits:
+            cur = prices.get(e["symbol"])
+            if cur is None:
+                continue
+            moves.append({
+                "symbol": e["symbol"], "date": e["date"],
+                "move_pct": round((cur - e["exit_px"]) / e["exit_px"] * 100, 1),
+            })
+        if not moves:
+            return None
+        moves.sort(key=lambda m: -m["move_pct"])
+        return {
+            "n": len(moves),
+            "n_higher_5pct": sum(1 for m in moves if m["move_pct"] >= 5.0),
+            "avg_move_pct": round(sum(m["move_pct"] for m in moves) / len(moves), 1),
+            "worst": moves[:3],
         }
 
     def _build_recent_missed_lessons(self, lookback_days: int = 14) -> str:
@@ -2948,8 +3118,14 @@ class TradingPipeline:
             return ""
         if not rows:
             return ""
+        
+        
+        
+        
+        
         real_miss_cats = {
-            "trend_timing_miss", "theme_blindspot", "fundamentals_mispricing"
+            "trend_timing_miss", "theme_blindspot", "fundamentals_mispricing",
+            "value_entry_missed",
         }
         theme_dates: dict[str, set[str]] = {}
         theme_symbols: dict[str, list[str]] = {}
@@ -2985,16 +3161,28 @@ class TradingPipeline:
                 sym = (m.get("symbol") or "").strip().upper()
                 
                 
-                key = theme or f"sym:{sym}"
-                if not key:
-                    continue
-                theme_dates.setdefault(key, set()).add(row_date)
-                theme_symbols.setdefault(key, []).append(sym)
                 
-                if key not in theme_lessons:
-                    lesson = (m.get("lesson") or "").strip()
-                    if lesson:
-                        theme_lessons[key] = lesson[:200]
+                
+                
+                
+                
+                
+                
+                keys = set()
+                if sym:
+                    keys.add(f"sym:{sym}")
+                if theme:
+                    keys.add(theme)
+                if not keys:
+                    continue
+                for key in keys:
+                    theme_dates.setdefault(key, set()).add(row_date)
+                    theme_symbols.setdefault(key, []).append(sym)
+                    
+                    if key not in theme_lessons:
+                        lesson = (m.get("lesson") or "").strip()
+                        if lesson:
+                            theme_lessons[key] = lesson[:200]
         
         recurring = [
             (k, len(theme_dates[k])) for k in theme_dates
@@ -3999,6 +4187,7 @@ class TradingPipeline:
         total_value: float,
         cash: float,
         recent_performance: dict,
+        macro_analysis=None,
     ) -> PMFacts:
         """Quantitative snapshot surfaced to PM as structured fields.
 
@@ -4102,6 +4291,20 @@ class TradingPipeline:
         f.rolling_5d_pct = recent_performance.get("rolling_5d_pct")
         f.rolling_20d_pct = recent_performance.get("rolling_20d_pct")
         f.in_drawdown = bool(recent_performance.get("in_drawdown"))
+
+        
+        
+        
+        try:
+            target = None
+            if macro_analysis is not None:
+                guidance = getattr(macro_analysis, "position_guidance", None)
+                target = getattr(guidance, "target_invested_pct", None)
+            if isinstance(target, (int, float)) and math.isfinite(target):
+                f.macro_target_invested_pct = float(target)
+                f.deployment_gap_pp = round(f.invested_pct - float(target), 1)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("pm_facts: deployment gap failed: %s", e)
 
         return f
 
@@ -4481,6 +4684,64 @@ class TradingPipeline:
                 out.add(sym)
         return out
 
+    def _atr_for_symbol(self, symbol: str) -> float | None:
+        """ATR(14) from ~30 days of daily bars; None when unknowable.
+
+        Used by the TRAIL_STOP noise-band clamp and the position-facts
+        vol-unit metrics. Failure is always None (callers degrade to the
+        pre-clamp behavior) — never raises.
+        """
+        try:
+            bars = self.market.get_ohlcv(symbol, 30) or []
+            if len(bars) < 15:
+                return None
+            from src.data.technical import compute_indicators
+            atr = compute_indicators(symbol, bars).atr_14
+            return float(atr) if atr and atr > 0 else None
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ATR fetch failed for %s: %s", symbol, e)
+            return None
+
+    def _trail_tightened_recently(self, symbol: str, calendar_days: int = 4) -> bool:
+        """True when a non-canceled TRAIL_STOP for `symbol` landed within the
+        last `calendar_days` days (~2 trading days across a weekend).
+
+        RC1 forensics (2026-07-16): the reviewer's ≥1.02×old_stop min-bump
+        rule means every ACCEPTED trail tightens ≥2%; per-session trailing
+        marched stops into the daily-noise band in 3-4 sessions (GE was
+        ratcheted 325→350 in 8 sessions on one flag). A cooldown makes
+        tightening a considered, at-most-every-other-day act.
+        """
+        try:
+            rows = self.db.get_trades(symbol=symbol, limit=10)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("trail cooldown query failed for %s: %s", symbol, e)
+            return False
+        from datetime import datetime as _dt, timedelta, timezone
+        cutoff = _dt.now(timezone.utc) - timedelta(days=calendar_days)
+        for row in rows:
+            if (row.get("action") or "").upper() != "TRAIL_STOP":
+                continue
+            if (row.get("fill_status") or "") == "canceled":
+                continue
+            
+            
+            
+            
+            if "ex-div" in (row.get("reasoning") or "").lower():
+                continue
+            ts = row.get("timestamp") or ""
+            try:
+                dt = _dt.fromisoformat(ts.replace("Z", "+00:00")) if "T" in ts \
+                    else _dt.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt >= cutoff:
+                return True
+        return False
+
     def _midday_execute_llm_actions(
         self, positions, review, run_id: str, blocked_symbols: set[str] | None = None,
         already_trimmed_today: set[str] | None = None,
@@ -4590,6 +4851,38 @@ class TradingPipeline:
                             symbol, new_stop, existing[0].current_price,
                         )
                         continue
+                    
+                    
+                    
+                    
+                    if not _reason_cites_hard_trigger(action_item.get("reason", "")):
+                        
+                        
+                        if self._trail_tightened_recently(symbol):
+                            logger.warning(
+                                "Midday: TRAIL_STOP %s skipped — a trail was "
+                                "already tightened within the last 2 trading "
+                                "days (ratchet cooldown; cite a hard trigger "
+                                "to bypass)", symbol,
+                            )
+                            continue
+                        
+                        
+                        
+                        
+                        atr = self._atr_for_symbol(symbol)
+                        if atr is not None:
+                            noise_floor = existing[0].current_price - 1.25 * atr
+                            if new_stop > noise_floor:
+                                logger.warning(
+                                    "Midday: TRAIL_STOP %s skipped — new_stop "
+                                    "$%.2f is inside the 1.25×ATR noise band "
+                                    "(floor $%.2f, ATR14 $%.2f); routine "
+                                    "volatility would fill it. Old stop kept; "
+                                    "cite a hard trigger to bypass.",
+                                    symbol, new_stop, noise_floor, atr,
+                                )
+                                continue
                     order = self.broker.replace_stop_loss(symbol, new_stop)
                     if order:
                         if isinstance(order, dict):
@@ -4717,8 +5010,16 @@ class TradingPipeline:
         
         
         
+        
+        
+        
+        
         from src.risk.rules import _effective_multiplier
+        sweeper = self._sweeper()
+        sweep_symbol = sweeper.symbol if sweeper is not None else None
         def _tier(p):
+            if sweep_symbol is not None and p.symbol == sweep_symbol:
+                return -1
             return 0 if _effective_multiplier(p.symbol) > 0 else 1
         targets = sorted(
             sellable,
@@ -4875,6 +5176,12 @@ class TradingPipeline:
                     loss_violation.message,
                 )
                 orders = self._midday_emergency_liquidate(positions, loss_violation, run_id)
+                
+                
+                
+                from src import decision_checkpoint as _dc
+                _dc.mark_consumed("morning")
+                _dc.write_status("morning", "emergency_sold")
                 return {
                     "status": "emergency_sold",
                     "orders": orders,
@@ -4884,47 +5191,101 @@ class TradingPipeline:
             
             
             
-            self.morning_research_stage.run(ctx)
-            macro_summary = ctx.macro_summary
-            macro_analysis = ctx.macro_analysis
-            news_intel = ctx.news_intel
-            analyses = ctx.analyses
-            earnings_results = ctx.earnings_results
-            data_status = ctx.data_status
+            
+            
+            
+            
+            
+            
+            
+            from src import decision_checkpoint as _dc
+            resumed = _dc.load("morning")
+            if resumed is not None:
+                logger.warning(
+                    "RESUME LANE: unconsumed decision checkpoint from %s "
+                    "(age %.0f min, %d decisions) — skipping research+PM, "
+                    "re-entering at RiskStage on fresh account state",
+                    resumed["run_id"], resumed["age_minutes"],
+                    len(resumed["portfolio_decision"].decisions),
+                )
+                ctx.macro_summary = resumed["macro_summary"]
+                ctx.macro_analysis = resumed["macro_analysis"]
+                ctx.news_intel = resumed["news_intel"]
+                ctx.analyses = resumed["analyses"]
+                ctx.earnings_results = resumed["earnings_results"]
+                ctx.data_status = resumed["data_status"]
+                ctx.portfolio_decision = resumed["portfolio_decision"]
+                portfolio_decision = ctx.portfolio_decision
+                
+                
+                
+                
+                bars: dict = {}
+                for d in portfolio_decision.decisions:
+                    if d.action != "BUY":
+                        continue
+                    try:
+                        bars[d.symbol] = self.market.get_ohlcv(
+                            d.symbol, self.config.trading.lookback_days,
+                        ) or []
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("resume: bar rehydrate failed for %s: %s",
+                                       d.symbol, e)
+                ctx.symbols_bars = bars
+            else:
+                
+                
+                self.morning_research_stage.run(ctx)
+                analyses = ctx.analyses
 
-            
-            
-            
-            
-            
-            
-            
-            late_breach = self._check_late_breach_and_emergency_liquidate(
-                run_id, "post-research",
-            )
-            if late_breach is not None:
-                return late_breach
+                
+                
+                
+                
+                
+                
+                
+                late_breach = self._check_late_breach_and_emergency_liquidate(
+                    run_id, "post-research",
+                )
+                if late_breach is not None:
+                    _dc.mark_consumed("morning")
+                    _dc.write_status("morning", "emergency_sold")
+                    return late_breach
 
-            if not analyses:
-                logger.warning("No analyses produced, skipping trading")
-                return {"status": "no_data", "orders": [], "run_id": run_id}
+                if not analyses:
+                    logger.warning("No analyses produced, skipping trading")
+                    
+                    
+                    
+                    _dc.write_status("morning", "no_data")
+                    return {"status": "no_data", "orders": [], "run_id": run_id}
 
-            
-            self._decision_stage(ctx)
-            portfolio_decision = ctx.portfolio_decision
+                
+                self._decision_stage(ctx)
+                portfolio_decision = ctx.portfolio_decision
 
-            
-            
-            
-            
-            
-            
-            
-            late_breach = self._check_late_breach_and_emergency_liquidate(
-                run_id, "post-decision",
-            )
-            if late_breach is not None:
-                return late_breach
+                
+                
+                
+                _dc.write(ctx)
+
+                
+                
+                
+                
+                
+                
+                
+                late_breach = self._check_late_breach_and_emergency_liquidate(
+                    run_id, "post-decision",
+                )
+                if late_breach is not None:
+                    
+                    
+                    _dc.mark_consumed("morning")
+                    _dc.write_status("morning", "emergency_sold")
+                    return late_breach
 
             if not portfolio_decision:
                 logger.info("Portfolio manager: parse failed, no decision object")
@@ -4943,6 +5304,13 @@ class TradingPipeline:
 
             
             early_exit = self._risk_stage(ctx)
+            
+            
+            
+            
+            
+            
+            _dc.mark_consumed("morning")
             if early_exit is not None:
                 early_exit["run_id"] = run_id
                 early_exit["data_status"] = dict(ctx.data_status)
@@ -4950,6 +5318,18 @@ class TradingPipeline:
 
             
             orders = self._execution_stage(ctx)
+
+            
+            
+            
+            sweeper = self._sweeper()
+            if sweeper is not None:
+                try:
+                    sweep_order = sweeper.park_excess(ctx)
+                    if sweep_order:
+                        orders.append(sweep_order)
+                except Exception as e:
+                    logger.warning("cash sweep: park_excess failed (non-fatal): %s", e)
 
             logger.info("=== Morning run complete: %d orders executed ===", len(orders))
             return {
@@ -5007,6 +5387,16 @@ class TradingPipeline:
             take_profit = float((buy or {}).get("take_profit") or 0)
 
             
+            
+            
+            try:
+                live_stop = self.broker.get_current_stop_price(sym)
+            except Exception:  # noqa: BLE001
+                live_stop = None
+            if isinstance(live_stop, (int, float)) and live_stop > 0:
+                stop_loss = float(live_stop)
+
+            
             days_held = None
             buy_ts = (buy or {}).get("timestamp")
             if buy_ts:
@@ -5051,6 +5441,16 @@ class TradingPipeline:
             drift_flag = weight_pct > 12 and pnl_pct > 10
             target_breach_flag = progress_pct is not None and progress_pct > 150
 
+            
+            
+            
+            
+            atr = self._atr_for_symbol(sym)
+            atr_pct = round(atr / cur * 100, 2) if (atr and cur > 0) else None
+            stop_distance_atrs = None
+            if atr and stop_loss and cur > stop_loss:
+                stop_distance_atrs = round((cur - stop_loss) / atr, 2)
+
             facts[sym] = {
                 "days_held": days_held,
                 "thesis_progress_pct": progress_pct,
@@ -5061,6 +5461,8 @@ class TradingPipeline:
                 "parabolic_flag": parabolic_flag,
                 "drift_flag": drift_flag,
                 "target_breach_flag": target_breach_flag,
+                "atr_pct": atr_pct,
+                "stop_distance_atrs": stop_distance_atrs,
             }
         return facts
 
@@ -5262,7 +5664,16 @@ class TradingPipeline:
         
         orders = list(auto_tp_orders) + list(exdiv_orders)
 
-        if positions:
+        
+        
+        
+        
+        review_positions = positions
+        sweeper = self._sweeper()
+        if sweeper is not None:
+            review_positions, _parked = sweeper.split_positions(positions)
+
+        if review_positions:
             
             
             
@@ -5294,7 +5705,7 @@ class TradingPipeline:
             raw_avg = calib.get("avg_hold_days")
             avg_hold_days = raw_avg if isinstance(raw_avg, (int, float)) else None
             position_facts = self._build_position_facts(
-                positions, morning_trades, total_value, avg_hold_days,
+                review_positions, morning_trades, total_value, avg_hold_days,
             )
 
             
@@ -5315,7 +5726,7 @@ class TradingPipeline:
             recent_performance = self._compute_recent_performance(last_equity)
 
             review, md_result = self.position_reviewer.review(
-                positions=positions,
+                positions=review_positions,
                 macro_summary=macro_summary,
                 cash_balance=cash,
                 total_value=total_value,
@@ -5339,7 +5750,7 @@ class TradingPipeline:
             self.db.insert_agent_log(
                 agent_name="position_reviewer", run_id=run_id,
                 input_summary=(
-                    f"{session_type} | {len(positions)} positions, ${total_value:.0f} total"
+                    f"{session_type} | {len(review_positions)} positions, ${total_value:.0f} total"
                 ),
                 input_message=md_result.user_message,
                 output_summary=review.overall_assessment if review else "parse_error",
@@ -5356,12 +5767,28 @@ class TradingPipeline:
             daily_pnl = total_value - last_equity
             loss_violation = self.risk_engine.check_daily_loss(last_equity, daily_pnl)
             if loss_violation:
+                
+                
+                
+                
+                
+                
                 orders.extend(self._midday_emergency_liquidate(
                     positions, loss_violation, run_id,
                 ))
+                self._reconcile_fills()
+                return {
+                    "status": "emergency_sold",
+                    "session": session_type,
+                    "positions": len(positions),
+                    "review": review.model_dump() if review else None,
+                    "orders": orders,
+                    "run_id": run_id,
+                    "stop_coverage_gaps": coverage_gaps,
+                }
             else:
                 orders.extend(self._midday_execute_llm_actions(
-                    positions, review, run_id,
+                    review_positions, review, run_id,
                     blocked_symbols=blocked_position_symbols,
                     already_trimmed_today=already_trimmed_today,
                 ))
@@ -5373,6 +5800,21 @@ class TradingPipeline:
         
         
         self._reconcile_fills()
+
+        
+        
+        
+        
+        
+        sweeper = self._sweeper()
+        if sweeper is not None:
+            try:
+                sweep_order = sweeper.park_excess(ctx)
+                if sweep_order:
+                    orders.append(sweep_order)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("cash sweep: park_excess failed (non-fatal): %s", e)
+
         return {
             "status": "reviewed",
             "session": session_type,
@@ -5688,6 +6130,13 @@ class TradingPipeline:
         
         
         
+        sweeper = self._sweeper()
+        if sweeper is not None:
+            positions, _parked = sweeper.split_positions(positions)
+
+        
+        
+        
         self._reconcile_fills()
 
         
@@ -5705,10 +6154,15 @@ class TradingPipeline:
 
         
         macro_summary = self.macro.get_macro_summary()
+        
+        
+        
+        
         today_trades = [
             self._actualize_trade_row(t)
-            for t in self.db.get_trades(limit=20, today_only=True, executed_only=True)
-        ]
+            for t in self.db.get_trades(limit=30, today_only=True, executed_only=True)
+            if (t.get("action") or "") not in ("SWEEP_BUY", "SWEEP_SELL")
+        ][:20]
         
         
         prior_outlook = self.db.get_latest_insights(before_date=today_str)
@@ -6035,7 +6489,41 @@ class TradingPipeline:
             return []
         
         expected = {"run": "morning", "midday": "midday", "close": "close"}
-        return [name for prefix, name in expected.items() if prefix not in present]
+        missing = [name for prefix, name in expected.items() if prefix not in present]
+
+        
+        
+        
+        
+        if "morning" not in missing and "run" in present:
+            
+            
+            try:
+                from src import decision_checkpoint as _dc0
+                legit_early_exit = _dc0.read_status("morning") is not None
+            except Exception:  # noqa: BLE001
+                legit_early_exit = False
+            
+            try:
+                agents = self.db.agent_names_logged_on("run-")
+                if (not legit_early_exit and agents
+                        and "portfolio_manager" not in agents):
+                    missing.append("morning (research ran, PM never did — killed mid-run?)")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("missing-session check: agent probe failed: %s", exc)
+            
+            
+            try:
+                import json as _json
+                from src import decision_checkpoint as _dc
+                p = _dc.checkpoint_path("morning")
+                if p.exists() and _json.loads(p.read_text()).get("consumed") is False:
+                    missing.append(
+                        "morning (PM plan never risk-reviewed — checkpoint unconsumed)"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("missing-session check: checkpoint probe failed: %s", exc)
+        return missing
 
     def _maybe_run_quarterly_meta(self) -> dict | None:
         """Evening-time piggyback for the quarterly meta-reflection loop.

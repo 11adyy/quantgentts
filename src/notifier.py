@@ -326,12 +326,17 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     
     missing = result.get("missing_sessions")
     if isinstance(missing, list) and missing:
-        if "morning" in missing:
-            lines.append(
-                "🔴 SESSION DID NOT RUN TODAY: morning — no agent activity "
-                "logged; check the timer/scheduler"
+        
+        
+        
+        hard = [m for m in missing
+                if m == "morning" or str(m).startswith("morning (")]
+        for m in hard:
+            detail = m if m != "morning" else (
+                "morning — no agent activity logged; check the timer/scheduler"
             )
-        soft = [m for m in missing if m != "morning"]
+            lines.append(f"🔴 MORNING SESSION INCOMPLETE TODAY: {detail}")
+        soft = [m for m in missing if m not in hard]
         if soft:
             lines.append(f"⚠️ no activity logged today for: {', '.join(soft)}")
 
