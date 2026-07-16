@@ -23,7 +23,8 @@ from pydantic import ValidationError
 
 from src.agents.base import BaseAgent
 from src.models import (
-    EveningReport, MissedOpportunity, NewsIntelligenceReport, Position,
+    BuyGrade, EveningReport, MissedOpportunity, NewsIntelligenceReport,
+    Position, SellGrade,
 )
 
 logger = logging.getLogger(__name__)
@@ -549,12 +550,60 @@ upcoming events that bear on held theses. Respond as JSON matching
         
         
         parsed = self._drop_invalid_missed_opportunities(parsed)
+        
+        
+        
+        
+        
+        
+        
+        parsed = self._drop_invalid_entries(parsed, "sell_grades", SellGrade)
+        parsed = self._drop_invalid_entries(parsed, "buy_grades", BuyGrade)
         try:
             report = EveningReport(**parsed)
         except ValidationError as e:
             logger.error("Evening report failed schema validation: %s", e)
             return None, result
         return report, result
+
+    @staticmethod
+    def _drop_invalid_entries(parsed: dict, key: str, model_cls) -> dict:
+        """Per-entry pre-validation for a list-of-models field (audit
+        round 2 #53). Validates each item individually against
+        `model_cls`; drops malformed ones with a warning naming the
+        symbol so operators can correlate against the trade tables.
+        Mutates `parsed` in place for `key`; non-list shapes normalize
+        to []. Mirrors _drop_invalid_missed_opportunities (PR #73)."""
+        raw = parsed.get(key)
+        if raw is None:
+            return parsed
+        if not isinstance(raw, list):
+            logger.warning(
+                "Evening analyst: %s is %s, not list — replacing with "
+                "empty list", key, type(raw).__name__,
+            )
+            parsed[key] = []
+            return parsed
+        valid: list[dict] = []
+        for i, item in enumerate(raw):
+            if not isinstance(item, dict):
+                logger.warning(
+                    "Evening analyst: dropping non-dict %s entry at "
+                    "index %d: %r", key, i, item,
+                )
+                continue
+            try:
+                model_cls(**item)
+            except ValidationError as e:
+                sym = item.get("symbol") or f"<idx {i}>"
+                logger.warning(
+                    "Evening analyst: dropping malformed %s entry for "
+                    "%s: %s", key, sym, e,
+                )
+                continue
+            valid.append(item)
+        parsed[key] = valid
+        return parsed
 
     @staticmethod
     def _drop_invalid_missed_opportunities(parsed: dict) -> dict:

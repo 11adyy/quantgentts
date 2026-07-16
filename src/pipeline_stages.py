@@ -263,6 +263,11 @@ class MorningResearchStage:
         
         try:
             macro_summary, macro_analysis, ma_result = macro_future.result()
+            
+            
+            
+            ctx.macro_summary = macro_summary
+            ctx.macro_analysis = macro_analysis
             self.db.insert_agent_log(
                 agent_name="macro_analyst", run_id=ctx.run_id,
                 input_summary=f"VIX={macro_summary.get('vix', {}).get('current')}",
@@ -666,6 +671,11 @@ class RiskStage:
                 sum(1 for d in portfolio_decision.decisions if d.action == "BUY"),
             )
 
+        
+        
+        rm_cash = ctx.cash
+        if isinstance(sweeper, CashSweeper):
+            rm_cash = ctx.cash + sweeper.parked_value(ctx.positions)
         verdict, rm_result = pipeline.risk_manager.review(
             portfolio_decision=portfolio_decision,
             positions=rm_positions,
@@ -674,6 +684,10 @@ class RiskStage:
             tech_analyses=analyses,
             news_intel=news_intel,
             earnings_analyses=earnings_results,
+            
+            
+            total_value=total_value,
+            cash=rm_cash,
         )
 
         pipeline.db.insert_agent_log(
@@ -1036,27 +1050,36 @@ class ExecutionStage:
                                 sizing_price, widened, atr14,
                             )
                             stop_price = widened
-                            
-                            
-                            
-                            
-                            
-                            
-                            if decision.take_profit > 0:
-                                reward = decision.take_profit - sizing_price
-                                risk = sizing_price - stop_price
-                                if risk > 0 and reward / risk < 1.2:
-                                    logger.warning(
-                                        "BUY %s skipped: ATR-widened stop "
-                                        "makes R/R %.2f (<1.2) — RM approved "
-                                        "a tighter-stop geometry that daily "
-                                        "noise would have destroyed.",
-                                        decision.symbol, reward / risk,
-                                    )
-                                    continue
                     except Exception as e:
                         logger.warning("ATR stop floor skipped for %s: %s",
                                        decision.symbol, e)
+
+                
+                
+                
+                
+                
+                
+                
+                
+                geometry_changed = (
+                    stop_price != decision.stop_loss
+                    or (decision.entry_price > 0 and sizing_price > decision.entry_price)
+                )
+                if (geometry_changed and decision.take_profit > 0
+                        and stop_price > 0 and sizing_price > stop_price):
+                    reward = decision.take_profit - sizing_price
+                    risk = sizing_price - stop_price
+                    if risk > 0 and reward / risk < 1.2:
+                        logger.warning(
+                            "BUY %s skipped: executed geometry makes R/R %.2f "
+                            "(<1.2) — RM approved entry $%.2f / stop $%.2f, "
+                            "execution moved it to $%.2f / $%.2f.",
+                            decision.symbol, reward / risk,
+                            decision.entry_price, decision.stop_loss,
+                            sizing_price, stop_price,
+                        )
+                        continue
 
                 qty_by_alloc = int((total_value * decision.allocation_pct / 100) / sizing_price)
                 qty_by_risk = None

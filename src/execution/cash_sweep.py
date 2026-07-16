@@ -183,18 +183,28 @@ class CashSweeper:
         self._pipeline._finalize_pending_protections([prot], context="CASH SWEEP")
 
         freed = qty * price
+        
+        
+        
+        
+        
         try:
             account = self._pipeline.broker.get_account()
-            ctx.positions = self._pipeline.broker.get_positions()
             ctx.cash = account["cash"]
             ctx.total_value = account["portfolio_value"]
-            logger.info(
-                "cash sweep: released ~$%.0f from %s (%s sh) — post-refresh "
-                "cash=$%.2f", freed, parked.symbol,
-                self._pipeline._format_qty(qty), ctx.cash,
-            )
         except Exception as e:  # noqa: BLE001
-            logger.warning("cash sweep: broker refresh after funding sell failed: %s", e)
+            
+            ctx.cash = cash + freed
+            logger.warning("cash sweep: account refresh after funding sell "
+                           "failed (%s) — estimating cash=$%.2f", e, ctx.cash)
+        try:
+            ctx.positions = self._pipeline.broker.get_positions()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("cash sweep: position refresh after funding sell failed: %s", e)
+        logger.info(
+            "cash sweep: released ~$%.0f from %s (%s sh) — post-refresh cash=$%.2f",
+            freed, parked.symbol, self._pipeline._format_qty(qty), ctx.cash,
+        )
         return freed
 
     
@@ -224,6 +234,30 @@ class CashSweeper:
         ctx.positions = positions
         ctx.cash = cash
         ctx.total_value = total_value
+
+        
+        
+        
+        
+        
+        
+        
+        
+        try:
+            last_equity = account.get("last_equity", total_value)
+            breach = pipeline.risk_engine.check_daily_loss(
+                last_equity, total_value - last_equity,
+            )
+        except Exception as e:  # noqa: BLE001 — unknowable breach state must not park
+            logger.warning("cash sweep: breach check failed (%s) — skipping "
+                           "park (conservative)", e)
+            return None
+        if breach is not None:
+            logger.warning(
+                "cash sweep: daily-loss breaker active (%s) — not parking on "
+                "a breach day", breach.message,
+            )
+            return None
 
         
         

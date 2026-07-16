@@ -874,7 +874,11 @@ class TradingPipeline:
         if uncovered_qty <= 0:
             return False
         try:
-            buy = self.db.get_symbol_last_buy(symbol) or {}
+            
+            
+            
+            
+            buy = self.db.get_symbol_last_buy(symbol, include_in_flight=True) or {}
         except Exception as exc:  # noqa: BLE001
             logger.warning("coverage repair: last-BUY lookup failed for %s: %s", symbol, exc)
             return False
@@ -954,6 +958,19 @@ class TradingPipeline:
         """
         
         
+        
+        
+        
+        
+        
+        
+        
+        if label in ("SELL", "EMERGENCY_SELL", "FORCE_DELEVER"):
+            try:
+                self.broker.cancel_open_entry_orders(symbol=symbol)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s: entry-order cancel failed for %s: %s",
+                               label, symbol, exc)
         ok, stop_specs, wal_row_id = self._cancel_stops_with_write_ahead(
             symbol, position_qty_before_sell,
         )
@@ -2312,11 +2329,13 @@ class TradingPipeline:
                 )
                 continue
             try:
-                order = self.broker.replace_stop_loss(
-                    p.symbol, new_stop, allow_lowering=True,
-                )
+                
+                
+                
+                
+                order = self.broker.shift_stops_down(p.symbol, amount)
             except Exception as e:
-                logger.error("ex-div: replace_stop_loss failed for %s: %s", p.symbol, e)
+                logger.error("ex-div: stop shift failed for %s: %s", p.symbol, e)
                 continue
             if not order:
                 continue
@@ -2326,8 +2345,9 @@ class TradingPipeline:
                     price=new_stop,
                     reasoning=(
                         f"ex-div adjustment: ex-div {div['date']}, div ${amount:.4f}/share. "
-                        f"Lowered stop $%.2f → $%.2f to absorb the mechanical open gap."
-                        % (current_stop, new_stop)
+                        f"Shifted {order.get('shifted', '?')} stop(s) down by the dividend "
+                        f"(highest {current_stop:.2f} → {new_stop:.2f}) to absorb the "
+                        f"mechanical open gap."
                     ),
                     run_id=run_id,
                     stop_loss=new_stop,
@@ -2735,6 +2755,12 @@ class TradingPipeline:
         
         
         
+        
+        
+        
+        
+        sweeper = self._sweeper()
+        sweep_symbol = sweeper.symbol if sweeper is not None else None
         sell_actions = ("SELL", "EMERGENCY_SELL", "FORCE_DELEVER", "REDUCE")
         out: list[dict] = []
         for row in all_rows:
@@ -2749,6 +2775,8 @@ class TradingPipeline:
             if sell_date < cutoff:
                 continue
             sym = row.get("symbol")
+            if sweep_symbol is not None and sym == sweep_symbol:
+                continue   
             sell_price = float(row.get("fill_price") or row.get("price") or 0) or 0.0
             if not sym or sell_price <= 0:
                 continue
@@ -2823,6 +2851,17 @@ class TradingPipeline:
                     spy_latest_close = 0.0
         except Exception as e:
             logger.warning("recent_buys: SPY bars fetch failed (relative-move disabled): %s", e)
+        
+        
+        
+        
+        
+        try:
+            spy_live = float(self.broker.get_latest_price("SPY") or 0) or 0.0
+            if spy_live > 0:
+                spy_latest_close = spy_live
+        except Exception as e:  # noqa: BLE001
+            logger.warning("recent_buys: live SPY quote failed (using last close): %s", e)
         out: list[dict] = []
         seen_symbols: set[str] = set()  
         for row in all_rows:
@@ -3348,9 +3387,34 @@ class TradingPipeline:
                         if lesson:
                             theme_lessons[key] = lesson[:200]
         
+        
+        
+        
+        
+        def _episodes(dates: set[str]) -> int:
+            from datetime import date as _d
+            parsed = sorted(
+                _d.fromisoformat(x) for x in dates
+                if isinstance(x, str) and len(x) >= 10
+            ) if dates else []
+            if not parsed:
+                return 0
+            n = 1
+            for a, b in zip(parsed, parsed[1:]):
+                if (b - a).days > 5:
+                    n += 1
+            return n
+
+        
+        
+        
+        
         recurring = [
-            (k, len(theme_dates[k])) for k in theme_dates
-            if len(theme_dates[k]) >= 2
+            (k, max(_episodes(theme_dates[k]),
+                    len({x for x in theme_symbols.get(k, []) if x})))
+            for k in theme_dates
+            if (_episodes(theme_dates[k]) >= 2
+                or len({x for x in theme_symbols.get(k, []) if x}) >= 2)
         ]
         if not recurring:
             return ""
@@ -4240,11 +4304,35 @@ class TradingPipeline:
             manifest = getattr(self.earnings_provider, "manifest", {}) or {}
         except Exception:
             return {}
+        from datetime import date as _date
         from pathlib import Path
-        out: dict[str, str] = {}
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        best: dict[str, tuple[str, dict]] = {}   
         for key, entry in manifest.items():
             if not isinstance(entry, dict) or entry.get("abandoned"):
                 continue
+            symbol = str(key).split("_")[0].upper()
+            fd = str(entry.get("filing_date") or "")
+            if symbol not in best or fd > best[symbol][0]:
+                best[symbol] = (fd, entry)
+
+        out: dict[str, str] = {}
+        today = et_today()
+        for symbol, (fd, entry) in best.items():
+            try:
+                if not fd or (today - _date.fromisoformat(fd)).days > 90:
+                    continue
+            except ValueError:
+                continue   
             analysis_path = entry.get("analysis_path")
             if not analysis_path:
                 continue
@@ -4256,9 +4344,13 @@ class TradingPipeline:
             except OSError:
                 continue
             head = text[:600]
-            if "bearish" in head.lower():
+            m = re.search(r"^\s*-?\s*\*{0,2}Sentiment\*{0,2}\s*:\s*(\w+)",
+                          head, re.MULTILINE | re.IGNORECASE)
+            sentiment = (m.group(1).lower() if m else None)
+            if sentiment == "bearish":
                 continue
-            symbol = str(key).split("_")[0].upper()
+            if sentiment is None and "bearish" in head.lower():
+                continue   
             snippet = head.replace("\n", " ").strip()[:140]
             if snippet:
                 out[symbol] = snippet
@@ -4676,8 +4768,15 @@ class TradingPipeline:
             )
             return reports, cached_results
         except Exception as e:
+            
+            
+            
+            
+            
+            
+            
             logger.error("[%s] Earnings load failed: %s", session, e)
-            return [], []
+            raise
 
     
     
@@ -4756,6 +4855,14 @@ class TradingPipeline:
         
         
         self._reconcile_fills()
+        
+        
+        
+        
+        try:
+            self.broker.cancel_open_entry_orders()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("emergency liquidate: entry-order cancel failed: %s", exc)
         orders: list[dict] = []
         pending_protections: list[dict] = []
         for p in positions:
@@ -4896,8 +5003,13 @@ class TradingPipeline:
         for row in rows:
             if (row.get("action") or "").upper() != "TRAIL_STOP":
                 continue
-            if (row.get("fill_status") or "") == "canceled":
-                continue
+            
+            
+            
+            
+            
+            
+            
             
             
             
@@ -5154,6 +5266,12 @@ class TradingPipeline:
             "FORCE DE-LEVER: cash=$%.2f, deficit=$%.2f — auto-selling to restore "
             "cash ≥ 0 (allow_margin=False)", ctx.cash, deficit,
         )
+        
+        
+        try:
+            self.broker.cancel_open_entry_orders()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("force de-lever: entry-order cancel failed: %s", exc)
 
         sellable = [p for p in ctx.positions if p.qty > 0]
         if not sellable:
@@ -5206,14 +5324,32 @@ class TradingPipeline:
         for p in targets:
             if projected_proceeds >= deficit:
                 break
-            qty = self._full_sell_qty(p.qty)
-            if qty is None:
+            is_sweep = sweep_symbol is not None and p.symbol == sweep_symbol
+            if is_sweep and p.current_price and p.current_price > 0:
+                
+                
+                
+                
+                
+                import math as _math
+                needed = (deficit - projected_proceeds) * 1.02
+                qty = min(float(_math.ceil(needed / p.current_price)), p.qty)
+                if qty >= p.qty:
+                    qty = self._full_sell_qty(p.qty)
+            else:
+                qty = self._full_sell_qty(p.qty)
+            if qty is None or qty <= 0:
                 continue
             sell_limit = round(p.current_price * 0.99, 2)
+            
+            
+            
+            
+            
             sale = self._submit_protected_sell(
                 symbol=p.symbol, qty=qty, limit_price=sell_limit,
                 reference_price=p.current_price, position_qty_before_sell=p.qty,
-                label="FORCE_DELEVER",
+                label="SWEEP_SELL" if is_sweep else "FORCE_DELEVER",
             )
             if sale is None:
                 continue
@@ -5238,7 +5374,9 @@ class TradingPipeline:
                     p.unrealized_pnl, p.market_value,
                 )
                 self.db.insert_trade(
-                    symbol=p.symbol, action="FORCE_DELEVER", qty=qty,
+                    symbol=p.symbol,
+                    action="SWEEP_SELL" if is_sweep else "FORCE_DELEVER",
+                    qty=qty,
                     price=p.current_price,
                     reasoning=(
                         f"cash-only auto de-lever: session opened with "
@@ -5474,9 +5612,16 @@ class TradingPipeline:
                     return late_breach
 
             if not portfolio_decision:
-                logger.info("Portfolio manager: parse failed, no decision object")
+                
+                
+                
+                
+                
+                
+                logger.error("Portfolio manager: parse failed, no decision object")
                 return {
-                    "status": "no_trades", "orders": [], "run_id": run_id,
+                    "status": "analysis_error", "orders": [], "run_id": run_id,
+                    "error": "PM output unparseable — not a deliberate hold",
                     "data_status": dict(ctx.data_status),
                     "stop_coverage_gaps": coverage_gaps,
                 }
@@ -5661,9 +5806,13 @@ class TradingPipeline:
         """
         import json as _json
         try:
+            
+            
+            
+            
+            
             rows = self.db.get_recent_agent_outputs(
                 agent_name="position_reviewer", limit=limit,
-                before_date=session_date_key(),
             )
         except Exception as e:
             logger.warning("own_recent_decisions: DB fetch failed: %s", e)
@@ -5840,9 +5989,14 @@ class TradingPipeline:
         session_news = self._run_news_update(run_id, session=session_type)
         if session_news:
             logger.info("%s news: %s", session_type.capitalize(), session_news.pm_briefing[:200])
-        _, session_earnings = self._load_earnings_analyses(
-            run_id, session=session_type, ctx=ctx,
-        )
+        try:
+            _, session_earnings = self._load_earnings_analyses(
+                run_id, session=session_type, ctx=ctx,
+            )
+        except Exception as e:  # noqa: BLE001 — reviewer proceeds without earnings
+            logger.error("%s: earnings load failed (continuing without): %s",
+                         session_type, e)
+            session_earnings = []
 
         
         macro_summary = self.macro.get_macro_summary()
@@ -5970,6 +6124,18 @@ class TradingPipeline:
                 
                 
                 
+                
+                
+                
+                
+                
+                try:
+                    fresh_positions = self.broker.get_positions()
+                    if fresh_positions:
+                        positions = fresh_positions
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("post-review breach: position refresh failed "
+                                   "(using pre-review snapshot): %s", e)
                 orders.extend(self._midday_emergency_liquidate(
                     positions, loss_violation, run_id,
                 ))
@@ -6183,6 +6349,15 @@ class TradingPipeline:
         
         
         self._drain_pending_protection_restores()
+        
+        
+        
+        
+        
+        try:
+            self._reconcile_stop_coverage()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("intra coverage reconcile failed (non-fatal): %s", exc)
         self._reconcile_orphan_pending_submits()  
 
         try:
@@ -6227,6 +6402,14 @@ class TradingPipeline:
         
         
         self._reconcile_fills()
+        
+        
+        
+        
+        try:
+            self.broker.cancel_open_entry_orders()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("emergency liquidate: entry-order cancel failed: %s", exc)
         orders: list[dict] = []
         pending_protections: list[dict] = []
         for p in positions:
@@ -6347,7 +6530,11 @@ class TradingPipeline:
         evening_news = self._run_news_update(run_id, session="evening")
         if evening_news:
             logger.info("Evening news: %s", evening_news.pm_briefing[:200])
-        _, evening_earnings = self._load_earnings_analyses(run_id, session="evening", ctx=ctx)
+        try:
+            _, evening_earnings = self._load_earnings_analyses(run_id, session="evening", ctx=ctx)
+        except Exception as e:  # noqa: BLE001 — evening proceeds without earnings
+            logger.error("evening: earnings load failed (continuing without): %s", e)
+            evening_earnings = []
 
         
         macro_summary = self.macro.get_macro_summary()

@@ -58,12 +58,19 @@ class TradingScheduler:
         return OrTrigger(triggers)
 
     def setup(self):
+        
+        
+        
+        
+        
+        
+        
         schedule = self.config.trading.schedule
 
         
         h, m = self._parse_time(schedule.earnings_preprocess)
         self.scheduler.add_job(
-            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri", timezone=ET),
             args=[self.pipeline.run_earnings_preprocess, "earnings_preprocess"],
             id="earnings_preprocess",
         )
@@ -71,7 +78,7 @@ class TradingScheduler:
         
         h, m = self._parse_time(schedule.morning)
         self.scheduler.add_job(
-            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri", timezone=ET),
             args=[self.pipeline.run_morning, "morning"],
             id="morning_run",
         )
@@ -99,7 +106,7 @@ class TradingScheduler:
         
         h, m = self._parse_time(schedule.midday)
         self.scheduler.add_job(
-            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri", timezone=ET),
             args=[self.pipeline.run_midday, "midday"],
             id="midday_check",
         )
@@ -109,7 +116,7 @@ class TradingScheduler:
         
         h, m = self._parse_time(schedule.close)
         self.scheduler.add_job(
-            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri", timezone=ET),
             args=[self.pipeline.run_close, "close"],
             id="close_check",
         )
@@ -117,7 +124,7 @@ class TradingScheduler:
         
         h, m = self._parse_time(schedule.evening)
         self.scheduler.add_job(
-            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            self._run_safe, CronTrigger(hour=h, minute=m, day_of_week="mon-fri", timezone=ET),
             args=[self.pipeline.run_evening, "evening"],
             id="evening_report",
         )

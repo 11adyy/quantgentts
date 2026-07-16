@@ -266,6 +266,21 @@ def _append_coverage_gap_banner(lines: list[str], result: dict) -> None:
 
 def _append_trade_session_body(lines: list[str], result: dict) -> None:
     
+    
+    
+    
+    
+    
+    if str(result.get("status", "")) == "analysis_error":
+        lines.append(
+            "🔴 PM output unparseable — no decisions were made today; "
+            "this is NOT a deliberate hold (wrapper retries next 30-min tick)"
+        )
+        err = result.get("error")
+        if err:
+            lines.append(f"error: {str(err)[:300]}")
+
+    
     _append_coverage_gap_banner(lines, result)
     orders = result.get("orders") or []
 
@@ -478,23 +493,62 @@ def _append_evening_body(lines: list[str], result: dict) -> None:
     
     auto_meta = result.get("auto_meta")
     if isinstance(auto_meta, dict):
-        applied = auto_meta.get("applied", 0)
-        rejected = auto_meta.get("rejected", 0)
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        report = auto_meta.get("editor_report") or {}
+        applied = len(report.get("applied") or [])
+        rej_list = report.get("rejected") or []
+        rejected = len(rej_list)
+        staged = sum(
+            1 for r in rej_list
+            if isinstance(r, dict) and "dry_run" in str(r.get("reason", ""))
+        )
+        proposed = int(auto_meta.get("proposed_learnings_count") or 0)
         period = auto_meta.get("period", "?")
         status = auto_meta.get("status", "?")
         if status == "auto_meta_error":
             err = auto_meta.get("error", "?")[:200]
             lines.append(f"🧪 meta {period}: ERROR — {err}")
-        elif applied == 0 and rejected > 0:
+        elif status == "digest_only":
+            
             
             lines.append(
-                f"🧪 meta {period}: {rejected} proposal(s) staged "
-                f"(dry-run — see data/evolution/{period}/proposed_edits.json)"
+                f"🧪 meta {period}: digest written but LLM reflection "
+                f"FAILED — check logs"
             )
         elif applied > 0:
             lines.append(
                 f"🧪 meta {period}: applied {applied} learning(s); "
                 f"rejected {rejected}"
+            )
+        elif staged > 0:
+            
+            lines.append(
+                f"🧪 meta {period}: {staged} proposal(s) staged "
+                f"(dry-run — see data/evolution/{period}/proposed_edits.json)"
+            )
+        elif rejected > 0:
+            
+            
+            lines.append(
+                f"🧪 meta {period}: 0 applied / {rejected} rejected "
+                f"(see data/evolution/edits.jsonl)"
+            )
+        elif proposed > 0:
+            
+            
+            
+            lines.append(
+                f"🧪 meta {period}: {proposed} proposal(s) generated but "
+                f"prompt-editor report missing — check logs"
             )
         
 
@@ -640,10 +694,30 @@ def _append_meta_body(lines: list[str], result: dict) -> None:
     period = result.get("period")
     if period:
         lines.append(f"period: {period}")
-    applied = result.get("applied", 0)
-    rejected = result.get("rejected", 0)
+    
+    
+    
+    
+    report = result.get("editor_report") or {}
+    applied = len(report.get("applied") or [])
+    rej_list = report.get("rejected") or []
+    rejected = len(rej_list)
+    staged = sum(
+        1 for r in rej_list
+        if isinstance(r, dict) and "dry_run" in str(r.get("reason", ""))
+    )
     if applied or rejected:
         lines.append(f"learnings: applied={applied} rejected={rejected}")
+        if staged:
+            lines.append(
+                f"🧪 {staged} proposal(s) staged for review — "
+                f"data/evolution/{period}/proposed_edits.json"
+            )
+    elif result.get("proposed_learnings_count"):
+        lines.append(
+            f"⚠️ {result['proposed_learnings_count']} proposal(s) generated "
+            f"but prompt-editor report missing — check logs"
+        )
     reason = result.get("reason")
     if reason:
         lines.append(f"reason: {reason}")

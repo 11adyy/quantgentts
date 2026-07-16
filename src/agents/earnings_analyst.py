@@ -62,6 +62,32 @@ Analyze this filing and respond with JSON. Cite specific numbers from the text a
         results = []
 
         for report in reports:
+            try:
+                results.extend(self._analyze_one(report))
+            except Exception as e:  # noqa: BLE001 — audit round 2: one bad
+                
+                
+                
+                
+                logger.error("earnings: analysis failed for %s %s — isolating: %s",
+                             report.symbol, report.form_type, e)
+                try:
+                    self.earnings_provider_record_failure(report)
+                except Exception:  # noqa: BLE001
+                    pass
+        return results
+
+    def earnings_provider_record_failure(self, report) -> None:
+        """Overridable seam: batch-isolation failure ticks the same 3-strike
+        counter as an in-analysis failure. No-op default when the provider
+        isn't wired (tests)."""
+        provider = getattr(self, "earnings_provider", None)
+        if provider is not None:
+            provider.record_failure(report)
+
+    def _analyze_one(self, report: EarningsReport) -> list[dict]:
+        results = []
+        if True:
             if report.is_new and report.text_excerpt:
                 
                 analysis, agent_result = self._analyze_new(report)
@@ -96,12 +122,26 @@ Analyze this filing and respond with JSON. Cite specific numbers from the text a
         
         prior = ""
         symbol_dir = Path(report.analysis_path).parent
-        prior_analyses = sorted(symbol_dir.glob("analysis_*.md"), reverse=True)
+
+        
+        
+        
+        
+        
+        def _filing_date_key(path: Path) -> str:
+            parts = path.stem.split("_")
+            return parts[-1] if parts else ""
+
+        prior_analyses = sorted(symbol_dir.glob("analysis_*.md"),
+                                key=_filing_date_key, reverse=True)
         if prior_analyses:
             
             for p in prior_analyses:
                 if str(p) != report.analysis_path:
-                    prior = p.read_text()[:5000]  
+                    try:
+                        prior = p.read_text()[:5000]
+                    except OSError:
+                        continue
                     break
 
         result = self.run(

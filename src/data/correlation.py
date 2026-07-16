@@ -23,7 +23,11 @@ CLUSTER_CORRELATION_THRESHOLD = 0.7
 
 
 def _returns_from_bars(bars: list[OHLCV]) -> pd.Series | None:
-    if not bars or len(bars) < 10:
+    
+    
+    
+    
+    if not bars or len(bars) < 21:
         return None
     closes = pd.Series([b.close for b in bars], index=[b.date for b in bars])
     returns = closes.pct_change().dropna()

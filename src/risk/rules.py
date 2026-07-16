@@ -113,6 +113,21 @@ class RiskRuleEngine:
                 limit=0.0,
             )]
 
+        
+        
+        
+        if cash is not None and not math.isfinite(cash):
+            return [RiskViolation(
+                rule="max_total_position_pct",   
+                message=(
+                    f"non-finite cash={cash} — cash_only cannot be evaluated; "
+                    f"refusing to risk-check BUY for {decision.symbol}; "
+                    f"blocking until the next clean snapshot"
+                ),
+                value=0.0,
+                limit=0.0,
+            )]
+
         violations = []
         signed_mul = _effective_multiplier(decision.symbol)  
         gross_mul = _gross_multiplier(decision.symbol)       

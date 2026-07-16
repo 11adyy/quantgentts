@@ -1157,19 +1157,15 @@ class MissedOpportunity(BaseModel):
                 )
         return self
 
-    @model_validator(mode="after")
-    def _theme_durability_required_when_themed(self) -> "MissedOpportunity":
-        
-        
-        
-        
-        if (self.theme_if_any or "").strip():
-            if self.theme_durability is None:
-                raise ValueError(
-                    "theme_if_any is set but theme_durability is None; pick "
-                    "multi_year_secular / 1_3_year_cycle / months_fad / unknown"
-                )
-        return self
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
     @model_validator(mode="after")
     def _addition_recommendation_consistency(self) -> "MissedOpportunity":

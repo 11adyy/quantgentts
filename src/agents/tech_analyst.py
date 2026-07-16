@@ -244,11 +244,21 @@ Current close: {current_price}""")
             indicators = s.get("indicators")
             if sym and indicators is not None:
                 input_indicators_by_sym[sym] = getattr(indicators, "atr_14", None)
+        submitted = {s.get("symbol") for s in symbols_data if isinstance(s, dict)}
         analyses: dict[str, TechAnalysisResult] = {}
         failed_symbols: list[str] = []
+        unsubmitted_symbols: list[str] = []
         for item in items:
             try:
                 analysis = TechAnalysisResult(**item)
+                
+                
+                
+                
+                
+                if analysis.symbol not in submitted:
+                    unsubmitted_symbols.append(analysis.symbol)
+                    continue
                 
                 atr = input_indicators_by_sym.get(analysis.symbol)
                 if atr is not None:
@@ -258,7 +268,11 @@ Current close: {current_price}""")
                 bad_symbol = str((item or {}).get("symbol", "?")) if isinstance(item, dict) else "?"
                 failed_symbols.append(bad_symbol)
                 logger.error("Failed to parse tech analysis item for %s: %s", bad_symbol, e)
-        submitted = {s.get("symbol") for s in symbols_data if isinstance(s, dict)}
+        if unsubmitted_symbols:
+            logger.warning(
+                "Tech analyst emitted %d row(s) for symbols not in the submitted "
+                "chunk — dropped: %s", len(unsubmitted_symbols), unsubmitted_symbols,
+            )
         missing = submitted - set(analyses.keys())
         if missing or failed_symbols:
             logger.warning(

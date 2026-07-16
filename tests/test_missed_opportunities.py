@@ -644,7 +644,11 @@ def test_recent_buys_injects_spy_relative_move(tmp_path):
     
     
     p.broker = MagicMock()
-    p.broker.get_latest_price.return_value = 85.0
+    
+    
+    p.broker.get_latest_price.side_effect = (
+        lambda sym: 100.5 if sym == "SPY" else 85.0
+    )
 
     p.market = MagicMock()
     def _ohlcv(symbol, lookback_days=12):

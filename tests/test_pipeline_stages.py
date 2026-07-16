@@ -268,9 +268,12 @@ def test_execution_stage_allows_buy_when_entry_price_within_5pct():
         reasoning_chain=_pm_rc(),
         decisions=[
             
+            
+            
+            
             TradeDecision(
                 action="BUY", symbol="SPY", allocation_pct=10,
-                entry_price=98.0, stop_loss=72.0, take_profit=130.0,
+                entry_price=98.0, stop_loss=72.0, take_profit=140.0,
                 reasoning="fresh setup",
             ),
         ],
