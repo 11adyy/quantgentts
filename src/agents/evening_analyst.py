@@ -390,6 +390,8 @@ class EveningAnalystAgent(BaseAgent):
                 
                 
                 
+                
+                
                 mkt_rel_raw = b.get("market_relative_move_pct")
                 if mkt_rel_raw is not None:
                     try:

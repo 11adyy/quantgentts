@@ -62,7 +62,17 @@ _SNAPSHOT_AGENTS: tuple[str, ...] = (
 
 
 
-_SNAPSHOT_PER_AGENT_CHAR_BUDGET = 3_000
+
+
+
+
+
+
+
+
+
+
+_SNAPSHOT_PER_AGENT_CHAR_BUDGET = 40_000
 
 
 
@@ -77,7 +87,21 @@ _INTERESTING_HEADING_KEYWORDS = (
     "cheat sheet", "cheatsheet",
     "learnings",  
     "auto-evolved",
+    
+    "guard", "guardrail", "principle", "critical", "classification",
 )
+
+
+
+
+
+
+_SNAPSHOT_DENYLIST_HEADINGS = frozenset({
+    "inputs you read",
+    "outputs consumed by",
+    "what you produce",
+    "example output shape",
+})
 
 
 
@@ -787,34 +811,60 @@ def _count_tech_signals(
     }
 
 
+
+
+
+
+
+
+
+_NEWS_AGENT_LOG_NAMES: tuple[str, ...] = (
+    "news_analyst",
+    "news_analyst_morning",
+    "news_analyst_midday",
+    "news_analyst_close",
+    "news_analyst_evening",
+)
+_EARNINGS_AGENT_LOG_NAMES: tuple[str, ...] = (
+    "earnings_analyst",
+    "earnings_analyst_preprocess",
+)
+
+
 def _count_news_signals(
     db: "Database", period_start: date, period_end: date
 ) -> dict:
+    n_sessions = 0
     n_state_changes = 0
     n_high_conv = 0
     n_bullish = 0
     n_bearish = 0
     n_neutral = 0
-    for _, data in _iter_agent_logs_in_window(
-        db, "news_analyst", period_start, period_end,
-    ):
-        if not isinstance(data, dict):
-            continue
-        sentiment = (data.get("market_sentiment") or "").strip()
-        if sentiment == "bullish":
-            n_bullish += 1
-        elif sentiment == "bearish":
-            n_bearish += 1
-        elif sentiment == "neutral":
-            n_neutral += 1
-        for ch in (data.get("state_changes") or []):
-            if not isinstance(ch, dict):
+    for agent_log_name in _NEWS_AGENT_LOG_NAMES:
+        for _, data in _iter_agent_logs_in_window(
+            db, agent_log_name, period_start, period_end,
+        ):
+            if not isinstance(data, dict):
                 continue
-            n_state_changes += 1
-            if (ch.get("conviction") or "").lower() == "high":
-                n_high_conv += 1
+            n_sessions += 1
+            
+            
+            
+            sentiment = (data.get("market_sentiment") or "").strip().lower()
+            if "bullish" in sentiment:
+                n_bullish += 1
+            elif "bearish" in sentiment:
+                n_bearish += 1
+            elif "neutral" in sentiment:
+                n_neutral += 1
+            for ch in (data.get("state_changes") or []):
+                if not isinstance(ch, dict):
+                    continue
+                n_state_changes += 1
+                if (ch.get("conviction") or "").lower() == "high":
+                    n_high_conv += 1
     return {
-        "n_sessions": n_bullish + n_bearish + n_neutral,
+        "n_sessions": n_sessions,
         "n_state_changes_total": n_state_changes,
         "n_high_conviction_state_changes": n_high_conv,
         "n_bullish_sessions": n_bullish,
@@ -856,15 +906,16 @@ def _count_earnings_signals(
     db: "Database", period_start: date, period_end: date
 ) -> dict:
     sentiment_counts: Counter = Counter()
-    for _, data in _iter_agent_logs_in_window(
-        db, "earnings_analyst", period_start, period_end, limit_hint=200,
-    ):
-        if not isinstance(data, dict):
-            continue
-        impl = data.get("investment_implications") or {}
-        sentiment = (impl.get("sentiment") or "").strip()
-        if sentiment:
-            sentiment_counts[sentiment] += 1
+    for agent_log_name in _EARNINGS_AGENT_LOG_NAMES:
+        for _, data in _iter_agent_logs_in_window(
+            db, agent_log_name, period_start, period_end, limit_hint=200,
+        ):
+            if not isinstance(data, dict):
+                continue
+            impl = data.get("investment_implications") or {}
+            sentiment = (impl.get("sentiment") or "").strip()
+            if sentiment:
+                sentiment_counts[sentiment] += 1
     total = sum(sentiment_counts.values())
     return {
         "n_filings_analyzed": total,
@@ -1048,17 +1099,22 @@ def _corrigibility_trend(digest: dict, prev: dict) -> dict:
 
 
 
+
+
 _HEADING_RE = re.compile(r"^(#{2,3})\s+(.+?)\s*$", re.MULTILINE)
 
 
 def _heading_is_interesting(heading: str) -> bool:
     """Return True iff the heading text contains any keyword from
-    `_INTERESTING_HEADING_KEYWORDS`. Case-insensitive, substring match.
+    `_INTERESTING_HEADING_KEYWORDS` and is not a denylisted I/O-contract
+    heading. Case-insensitive, substring match.
 
     Intentionally permissive — false positives are cheap (a harmless
     section ends up in the snapshot), false negatives are expensive (a
     rule section is omitted and the meta-reflector re-proposes it)."""
-    h = heading.lower()
+    h = heading.lower().strip()
+    if h in _SNAPSHOT_DENYLIST_HEADINGS:
+        return False
     return any(kw in h for kw in _INTERESTING_HEADING_KEYWORDS)
 
 
@@ -1127,6 +1183,7 @@ def _extract_agent_prompt_snapshot(
         "learnings":    str,            # "## Learnings" body (maybe "")
         "total_chars":  int,            # actual compressed size
         "truncated":    bool,           # True iff budget was hit
+        "skipped_sections": [str],      # headings dropped for budget
       }
 
     Always returns a dict even on empty/weird inputs — callers don't need
@@ -1142,6 +1199,7 @@ def _extract_agent_prompt_snapshot(
         "learnings": "",
         "total_chars": 0,
         "truncated": False,
+        "skipped_sections": [],
     }
     if not prompt_text or not prompt_text.strip():
         return out
@@ -1200,6 +1258,7 @@ def _extract_agent_prompt_snapshot(
         candidate_chunk = f"## {heading}\n\n{body}".strip()
         if running_chars + len(candidate_chunk) > char_budget:
             out["truncated"] = True
+            out["skipped_sections"].append(heading)
             
             
             
@@ -1260,6 +1319,7 @@ def _build_agent_prompts_snapshot(
                 "learnings": "",
                 "total_chars": 0,
                 "truncated": False,
+                "skipped_sections": [],
                 "error": "prompt_file_missing",
             }
             continue
@@ -1275,6 +1335,7 @@ def _build_agent_prompts_snapshot(
                 "learnings": "",
                 "total_chars": 0,
                 "truncated": False,
+                "skipped_sections": [],
                 "error": f"read_failed: {exc}",
             }
             continue

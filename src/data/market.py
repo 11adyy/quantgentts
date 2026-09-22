@@ -53,13 +53,13 @@ class MarketDataProvider:
             if bars:
                 logger.info("%s for %s, fallback source returned %d bars",
                             reason, symbol, len(bars))
-            if not bars:
-                
-                
-                
-                
-                return self._try_fallback(symbol, lookback_days,
-                                          reason="yfinance all-NaN")
+            
+            
+            
+            
+            
+            
+            
             return bars
         except Exception as e:  # noqa: BLE001
             logger.warning("fallback_bars failed for %s: %s", symbol, e)
@@ -96,6 +96,12 @@ class MarketDataProvider:
         
         required_cols = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in df.columns]
         clean_df = df.dropna(subset=required_cols) if required_cols else df
+        if required_cols and clean_df.empty:
+            
+            
+            
+            logger.warning("yfinance returned only NaN rows for %s — trying fallback", symbol)
+            return self._try_fallback(symbol, lookback_days, reason="yfinance all-NaN")
         if len(clean_df) < len(df):
             logger.warning(
                 "yfinance returned %d row(s) with NaN OHLCV for %s — dropped; "
