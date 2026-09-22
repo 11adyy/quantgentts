@@ -42,6 +42,21 @@ class ConstructorConfig:
     default_stop_atr_multiple: float = 2.0
     
     fallback_stop_pct: float = 0.05
+    
+    
+    
+    
+    
+    
+    
+    max_new_position_pct: float = 7.5
+    
+    
+    new_position_floor_pct: float = 2.5
+    
+    
+    max_add_step_pct: float = 2.5
+    max_add_ceiling_pct: float = 10.0
 
 
 class PortfolioConstructor:
@@ -117,6 +132,10 @@ class PortfolioConstructor:
                 )
                 if buy_decision is not None:
                     buys.append(buy_decision)
+                elif current_pct > 0:
+                    
+                    
+                    buys.append(self._hold_decision(target))
 
         
         
@@ -285,7 +304,35 @@ class PortfolioConstructor:
         
         
         from src.risk.rules import _gross_multiplier
+        if current_pct < self.cfg.new_position_floor_pct:
+            if target_pct > self.cfg.max_new_position_pct:
+                logger.info(
+                    "Constructor: %s NEW position target %.1f%% capped at %.1f%% "
+                    "(flat entry sizing; conviction=%s, current %.2f%%)",
+                    target.symbol, target_pct, self.cfg.max_new_position_pct,
+                    getattr(target, "conviction", "?"), current_pct,
+                )
+                target_pct = self.cfg.max_new_position_pct
+        else:
+            add_cap = min(current_pct + self.cfg.max_add_step_pct, self.cfg.max_add_ceiling_pct)
+            if target_pct > add_cap:
+                logger.info(
+                    "Constructor: %s ADD target %.1f%% capped at %.1f%% "
+                    "(current %.1f%% + %.1fpp step, %.0f%% ceiling)",
+                    target.symbol, target_pct, add_cap, current_pct,
+                    self.cfg.max_add_step_pct, self.cfg.max_add_ceiling_pct,
+                )
+                target_pct = add_cap
         allocation_pct = (target_pct - current_pct) / _gross_multiplier(target.symbol)
+        if allocation_pct <= 0:
+            return None
+        if (target_pct - current_pct) < self.cfg.min_trade_weight_delta:
+            
+            
+            logger.info("Constructor: %s add of %.2fpp after caps is below the %.2fpp churn "
+                        "threshold — no order", target.symbol, target_pct - current_pct,
+                        self.cfg.min_trade_weight_delta)
+            return None
         
         
         

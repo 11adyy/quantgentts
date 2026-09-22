@@ -219,6 +219,10 @@ class CashSweeper:
         if not self.enabled():
             return None
         pipeline = self._pipeline
+        
+        
+        
+        pending = pipeline.broker.open_buy_notional()
         try:
             account = pipeline.broker.get_account()
             positions = pipeline.broker.get_positions()
@@ -262,7 +266,6 @@ class CashSweeper:
         
         
         
-        pending = pipeline.broker.open_buy_notional()
         if pending is None:
             logger.warning("cash sweep: open-order query failed — skipping park "
                            "(conservative: unknown pending BUY holds)")

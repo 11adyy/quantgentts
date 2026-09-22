@@ -2604,7 +2604,7 @@ def test_pipeline_buys_use_refreshed_cash_after_sell_phase(
     assert buy_kw["symbol"] == "QQQ"
     
     
-    assert buy_kw["qty"] == 10
+    assert buy_kw["qty"] == 7  
     assert buy_kw["side"] == "buy"
     assert buy_kw["limit_price"] == 100.0
     assert buy_kw["stop_loss_price"] == 95.0
