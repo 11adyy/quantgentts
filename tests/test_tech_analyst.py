@@ -184,11 +184,11 @@ def test_tech_analyst_auto_chunks_large_batch(mock_cls, sample_indicators, sampl
     ]
 
     
-    call_counter = {"n": 0}
-
+    
+    
     def _chunk_response(**kw):
-        call_counter["n"] += 1
-        chunk_syms = syms[:25] if call_counter["n"] == 1 else syms[25:]
+        content = json.dumps(kw.get("messages", ""))
+        chunk_syms = [s for s in syms if s in content]
         arr = [json.loads(_valid_response_for(s))[0] for s in chunk_syms]
         resp = MagicMock()
         resp.content = [MagicMock(text=json.dumps(arr))]

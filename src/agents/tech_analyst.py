@@ -1,4 +1,6 @@
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.agents.base import BaseAgent, AgentResult
@@ -17,6 +19,11 @@ _BARS_PER_SYMBOL = 20
 
 _MAX_SYMBOLS_PER_CALL = 30
 _CHUNK_SIZE = 25
+
+
+
+
+_CHUNK_WORKERS = max(1, int(os.environ.get("QUANTGENTS_TECH_CHUNK_WORKERS", "3") or 3))
 
 
 class TechAnalystAgent(BaseAgent):
@@ -174,11 +181,29 @@ Current close: {current_price}""")
         chunk_costs: list[float] = []
         any_unknown_cost = False
         last_model = self.model
-        for i, chunk in enumerate(chunks, 1):
-            chunk_analyses, chunk_result = self._analyze_chunk(
+
+        def _run_chunk(chunk):
+            return self._analyze_chunk(
                 chunk, prior_ratings, valuations,
                 prior_macro_regime, prior_macro_outlook,
             )
+
+        
+        
+        
+        
+        outcomes: list[tuple] = [({}, None)] * len(chunks)
+        workers = min(_CHUNK_WORKERS, len(chunks))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_run_chunk, c): idx for idx, c in enumerate(chunks)}
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                try:
+                    outcomes[idx] = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Tech chunk %d/%d failed: %s", idx + 1, len(chunks), exc,
+                                 exc_info=True)
+        for i, (chunk_analyses, chunk_result) in enumerate(outcomes, 1):
             merged.update(chunk_analyses)
             if chunk_result is not None:
                 combined_raw.append(f"--- chunk {i}/{len(chunks)} ---\n{chunk_result.raw_text}")

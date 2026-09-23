@@ -52,6 +52,12 @@ _ETF_SECTORS = {
     
     
     "SH": "Broad", "SDS": "Broad", "PSQ": "Broad", "SQQQ": "Broad",
+    
+    
+    
+    "GLD": "Broad", "TLT": "Broad", "IBIT": "Broad",
+    "EFA": "Broad", "EEM": "Broad", "FXI": "Broad", "INDA": "Broad", "EWJ": "Broad",
+    "XBI": "Healthcare", "URA": "Energy",
 }
 
 

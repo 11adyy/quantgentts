@@ -34,7 +34,10 @@ REQUEST_DELAY = 0.12
 
 ETFS = {"SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLV", "XLI", "XLP",
         "XLY", "XLU", "XLRE", "XLB", "SMH", "SOXX", "DRAM", "CHPX",
-        "SH", "SDS", "PSQ", "SQQQ"}
+        "SH", "SDS", "PSQ", "SQQQ",
+        
+        "GLD", "TLT", "IBIT", "EFA", "EEM", "FXI", "INDA", "EWJ", "XBI", "URA",
+        "SGOV"}
 
 
 @dataclass
