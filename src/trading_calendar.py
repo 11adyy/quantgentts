@@ -42,6 +42,7 @@ SESSION_WINDOWS: dict[str, tuple[int, int]] = {
     "midday":              (780, 870),   
     "close":               (930, 960),   
     "evening":             (1200, 1320), 
+    "earnings_catchup":    (965, 1195),  
 }
 
 

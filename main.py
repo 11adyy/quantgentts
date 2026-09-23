@@ -29,6 +29,13 @@ _RETRYABLE_RESULT_STATUSES = frozenset(
     {"broker_error", "fetch_error", "analysis_error"}
 )
 
+
+
+
+
+
+_PARTIAL_EXIT_CODE = 3
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -51,7 +58,7 @@ def main():
         "--mode",
         choices=[
             "live", "once", "morning", "midday", "close", "evening",
-            "intra_check", "earnings_preprocess", "meta", "daily",
+            "intra_check", "earnings_preprocess", "earnings_catchup", "meta", "daily",
         ],
         default="once", help="Run mode",
     )
@@ -172,7 +179,10 @@ def main():
             result = pipeline.run_evening()
         elif args.mode == "intra_check":
             result = pipeline.run_intra_check()
-        elif args.mode == "earnings_preprocess":
+        elif args.mode in ("earnings_preprocess", "earnings_catchup"):
+            
+            
+            
             result = pipeline.run_earnings_preprocess()
         elif args.mode == "meta":
             result = pipeline.run_quarterly_meta_reflection(
@@ -217,6 +227,13 @@ def main():
     
     
     status = result.get("status") if isinstance(result, dict) else None
+    if status == "partial":
+        logger.info(
+            "Session %s ended with status 'partial' — exiting %d so the wrapper "
+            "continues the queue on the next tick without marking a failure.",
+            args.mode, _PARTIAL_EXIT_CODE,
+        )
+        sys.exit(_PARTIAL_EXIT_CODE)
     if status in _RETRYABLE_RESULT_STATUSES:
         logger.warning(
             "Session %s ended with retryable status %r — exiting non-zero "
