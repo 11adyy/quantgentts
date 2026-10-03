@@ -1,7 +1,16 @@
-# quantgents
+![quantgentts — multi-agent trading](assets/banner.png)
 
+# quantgentts
 
-LLM multi-agent quantitative trading system for US equities. Eight specialized daily agents — covering technical analysis, macroeconomic regimes, real-time news intelligence, SEC 10-Q/10-K filings, portfolio management, risk review, position management, and post-market reflection — coordinate through **schema-enforced reasoning chains**: every chain-of-thought step is a Pydantic `min_length=1` mandatory field, so the LLM cannot skip steps or fake the audit trail. A separate **quarterly Meta Reflector** reviews 90 days of accumulated outcomes (themes caught vs missed, loss patterns by attributable agent, signal activity, agent hit rates) and proposes append-only edits to six of the eight agents' prompts under a 10-invariant safety system. Decisions execute via Alpaca with multi-layer risk controls — deterministic Python filters (cash-only, daily-loss circuit breaker, sector caps, correlation cluster) gate every order, and an LLM Risk Manager audits the Portfolio Manager's plan with veto power and per-symbol modifications before it reaches the broker.
+A multi-agent trading system for US equities. It combines LLM research, portfolio decisions and deterministic risk checks, with execution through Alpaca.
+
+Eight daily agents work across three stages:
+
+- **Research:** technical analysis, macroeconomic conditions, news and SEC filings.
+- **Trading:** portfolio construction, risk review and position management. Python rules check cash, daily losses, sector exposure and correlation before orders reach the broker.
+- **Reflection:** post-market analysis feeds the next session with trade assessments and updated context.
+
+Agent outputs follow Pydantic schemas with required reasoning fields. A separate **quarterly Meta Reflector** reviews 90 days of outcomes and proposes append-only prompt updates under ten enforced invariants.
 
 > ⚠️ **Disclaimer**: This software is provided **for educational and research purposes only**. It is NOT investment advice. Trading securities involves substantial risk of loss; you can lose more than your initial deposit. Past performance — including any backtest, simulation, paper-trading result, or live result observed in this repository — does not guarantee future performance. The authors and contributors make no representation that any strategy, signal, or system implemented here will achieve any particular result, and no representation that any code path is correct, fit for purpose, or free from defects.
 >
